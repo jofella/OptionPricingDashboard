@@ -1,8 +1,12 @@
 # 🧮 Computational Finance Dashboard (CompFinLearn)
 
 This project was developed during my master's studies as part of the **Computational Finance** course at CAU Kiel.
-It is the companion of my [Risk Management Dashboard](https://github.com/jofella/RiskLearnDashboard): an interactive
-review of the lecture's numerical methods and an exercise in building modular **Streamlit** applications.
+It serves both as a review of the lecture's numerical methods for option pricing and hedging and as an exercise in
+building interactive dashboards with **Streamlit**. It is the companion of my
+[Risk Management Dashboard](https://github.com/jofella/RiskLearnDashboard) and follows the same modular Python structure.
+
+🔗 **Live dashboard:**  
+https://optionpricinglearningdashboard.streamlit.app/
 
 ---
 
