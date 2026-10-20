@@ -9,6 +9,7 @@ from scipy.stats import norm
 
 from util.black_scholes import bs_price, bs_greeks
 from util.monte_carlo import gbm_terminal, delta_fd, delta_pathwise, delta_lr, digital_delta_exact
+from util.ui import takeaways, test_yourself
 
 st.title("🧭 Monte Carlo Sensitivities (Greeks)")
 st.markdown(r"""
@@ -92,6 +93,24 @@ else:
     multiplies the full payoff. With common random numbers the finite-difference estimator converges
     to the pathwise one as $h \\to 0$.
     """)
+with st.expander("🎓 Deep dive: deriving the pathwise and likelihood ratio estimators"):
+    st.markdown(r"""
+    Write the price as $z(s) = E[Z(s)]$ with $Z(s) = e^{-rT}f\big(s\,e^{(r - \sigma^2/2)T + \sigma\sqrt T X}\big)$.
+
+    **Pathwise (infinitesimal perturbation).** Differentiate *inside* the expectation:
+    $z'(s) = E\big[\frac{\partial}{\partial s}Z(s)\big] = E\big[e^{-rT}f'(S(T))\frac{S(T)}{s}\big]$, because $\partial S(T)/\partial s = S(T)/s$.
+    Interchanging derivative and expectation requires $Z$ to be (Lipschitz) continuous in $s$. For a call
+    $f' = 1_{\{S_T > K\}}$, giving the estimator used here.
+
+    **Likelihood ratio.** Move the parameter into the **density** instead: $z(s) = \int e^{-rT}f(y)\,g_s(y)\,dy$, where
+    $g_s$ is the density of $S(T)$. Differentiating the density,
+
+    $$z'(s) = \int e^{-rT}f(y)\,\frac{\partial_s g_s(y)}{g_s(y)}\,g_s(y)\,dy = E\big[e^{-rT}f(S(T))\,\partial_s\log g_s(S(T))\big].$$
+
+    For the lognormal density, $\partial_s\log g_s = X/(s\sigma\sqrt T)$ — the **score function**. No derivative of $f$ is
+    needed, so discontinuous payoffs are fine; the price is that the score is unbounded, which inflates the variance.
+    """)
+
 st.write("---")
 
 # ── 2. FD bias-variance ──────────────────────────────────────────────
@@ -156,6 +175,24 @@ difference quotient averages the slope over too wide an interval. For small $h$ 
 {'it levels off at the pathwise variance — the CRN estimator *becomes* the pathwise estimator.' if not digital else 'it still grows like 1/h because the digital payoff jumps.'}
 The best step for CRN here is $h \\approx {best:.3g}$. Unbiased methods (dashed lines) avoid the trade-off entirely.
 """)
+with st.expander("🎓 Deep dive: bias and optimal step size of finite differences"):
+    st.markdown(r"""
+    Taylor expansion around $s$ gives
+    $z(s \pm \tfrac h2) = z \pm \tfrac h2 z' + \tfrac{h^2}{8}z'' \pm \tfrac{h^3}{48}z''' + \dots$, so the central difference has
+
+    $$\frac{z(s + h/2) - z(s - h/2)}{h} = z'(s) + \frac{h^2}{24}z'''(s) + O(h^4).$$
+
+    (A forward difference would have bias of order $h$ — much worse.) The mean squared error is
+    $\text{MSE}(h) = \big(\tfrac{h^2}{24}z'''\big)^2 + \operatorname{Var}/N$:
+
+    - **Independent draws:** $\operatorname{Var} \approx 2\operatorname{Var}(Z)/h^2$. Balancing $h^4$ against $1/(Nh^2)$ gives
+      $h^* \propto N^{-1/6}$ and $\text{MSE} \propto N^{-2/3}$ — slower than the usual $N^{-1}$.
+    - **Common random numbers, Lipschitz payoff:** the variance stays bounded, so $h$ can be taken small and the MSE
+      approaches $\operatorname{Var}/N$ — as good as the pathwise method.
+    - **Common random numbers, discontinuous payoff (digital):** the difference is non-zero only on paths with $S_T$
+      within $O(h)$ of $K$, which gives $\operatorname{Var} \propto 1/h$ and again a genuine trade-off.
+    """)
+
 st.write("---")
 
 # ── 3. LR across strikes ─────────────────────────────────────────────
@@ -193,3 +230,35 @@ get a tiny number. As $K$ grows, fewer paths pay and the absolute variance falls
 **relative** error (dashed, log scale): it is smallest near $K \\approx {Ks[i_min]:.0f}$, where the delta itself
 is largest, and blows up for deep in-the-money and deep out-of-the-money digitals.
 """)
+
+with st.expander("🎓 Deep dive: second-order Greeks (gamma)"):
+    st.markdown(r"""
+    - **Finite differences:** $\frac{z(s+h) - 2z(s) + z(s-h)}{h^2}$; even with common random numbers its variance explodes
+      for a call, because the second difference of the kinked payoff is non-zero only near the strike.
+    - **Pathwise:** fails for a call — the pathwise first derivative is a step function, whose derivative is 0 almost
+      everywhere.
+    - **Likelihood ratio:** works, using the second derivative of the density.
+    - **Mixed:** apply the pathwise method once and the likelihood ratio once
+      ("LR-pathwise"), usually the most efficient choice for gamma.
+
+    General rule: pathwise where the payoff is smooth enough, likelihood ratio where it is not, and finite
+    differences (with common random numbers!) when nothing else is available.
+    """)
+
+takeaways([
+    "Finite differences need common random numbers and a carefully chosen $h$ (bias $O(h^2)$ vs. variance).",
+    "Pathwise derivatives are unbiased and low-variance but require a continuous payoff — they fail for digitals.",
+    "Likelihood ratio differentiates the density (score function), works for any payoff, but has higher variance.",
+    "Choose the method by payoff smoothness; for gamma combine pathwise and likelihood ratio.",
+])
+
+test_yourself("greeks", [
+    (r"Derive the pathwise delta estimator of a European call in the Black-Scholes model.",
+     r"$\partial_s e^{-rT}(S_T - K)^+ = e^{-rT}1_{\{S_T > K\}}\,\partial_s S_T = e^{-rT}1_{\{S_T > K\}}S_T/s$; average over simulations."),
+    (r"Why does the pathwise method fail for a digital option, and which method works instead?",
+     r"The payoff $1_{\{S_T \ge K\}}$ has derivative 0 almost everywhere, so the pathwise estimator is identically 0. The likelihood ratio method (or finite differences) works."),
+    (r"What is the bias of the central finite difference, and why is it better than the forward difference?",
+     r"$\frac{h^2}{24}z'''(s) + O(h^4)$; the forward difference has bias $\frac h2 z''(s) + O(h^2)$, one order worse, because the even terms do not cancel."),
+    (r"Why do common random numbers reduce the variance of the finite-difference estimator so drastically?",
+     r"With the same $X_n$ the two prices are highly positively correlated, so the variance of their difference is small (of order $h^2$ for Lipschitz payoffs) instead of $2\operatorname{Var}(Z)$."),
+])

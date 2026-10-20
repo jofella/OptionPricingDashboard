@@ -12,6 +12,7 @@ import streamlit as st
 from util.finite_differences import solve_heat_theta, thomas
 from util.black_scholes import bs_price
 from util.binomial import crr_price, payoff_fn
+from util.ui import takeaways, test_yourself
 
 st.title("🔲 Finite Difference Methods")
 st.markdown(r"""
@@ -54,6 +55,41 @@ with st.expander("📖 Stability: why the explicit scheme can explode"):
     If violated, rounding errors in the highest-frequency mode are amplified by $|1 - 4\lambda| > 1$ in every
     step and grow exponentially. Implicit and Crank-Nicolson schemes are **unconditionally stable**, but
     need a tridiagonal linear solve per step (Thomas algorithm, $O(m)$ operations).
+    """)
+
+with st.expander("🎓 Deep dive: why transform to the heat equation?"):
+    st.markdown(r"""
+    The Black-Scholes PDE $\partial_t v + rx\,\partial_x v + \frac12\sigma^2x^2\partial_{xx}v - rv = 0$ has **variable
+    coefficients** ($x$ and $x^2$) and runs **backwards** from a terminal condition. Three substitutions remove both issues:
+
+    1. $x = \log(S/K)$ turns the coefficients into constants (multiplicative moves become additive);
+    2. $\tilde t = \frac{\sigma^2}{2}(T - t)$ reverses time, so the payoff becomes an **initial** condition;
+    3. $v = K e^{-\frac{q-1}{2}x - \frac{(q+1)^2}{4}\tilde t}\,w$ with $q = 2r/\sigma^2$ removes the first-order and zero-order
+       terms (the exponent is chosen exactly to cancel them).
+
+    What remains is the **heat equation** $w_{\tilde t} = w_{xx}$, the best-studied PDE in numerical analysis — every
+    stability and convergence result for it applies directly. The price for this convenience: the grid in $S$ is
+    logarithmic (fine near small $S$) and the boundary conditions have to be transformed as well.
+    """)
+
+with st.expander("🎓 Deep dive: consistency, stability and convergence"):
+    st.markdown(r"""
+    Replacing derivatives by difference quotients,
+
+    $$\partial_{\tilde t}w \approx \frac{w_i^{(\nu+1)} - w_i^{(\nu)}}{\Delta\tilde t}, \qquad \partial_{xx}w \approx \frac{w_{i+1} - 2w_i + w_{i-1}}{\Delta x^2},$$
+
+    introduces **truncation errors** $O(\Delta\tilde t)$ (time) and $O(\Delta x^2)$ (space, by Taylor expansion). A scheme is
+    **consistent** if these vanish as the grid is refined. The **Lax equivalence theorem** says: for a consistent scheme
+    of a well-posed linear problem, **convergence ⇔ stability**. Stability means errors (rounding, discretisation) are
+    not amplified from step to step.
+
+    | Scheme | Truncation error | Stability |
+    |---|---|---|
+    | explicit ($\theta = 0$) | $O(\Delta\tilde t + \Delta x^2)$ | only if $\lambda \le 1/2$ |
+    | implicit ($\theta = 1$) | $O(\Delta\tilde t + \Delta x^2)$ | unconditional |
+    | Crank-Nicolson ($\theta = \frac12$) | $O(\Delta\tilde t^2 + \Delta x^2)$ | unconditional |
+
+    Crank-Nicolson is centred in time (the average of explicit and implicit), which cancels the first-order time error.
     """)
 
 st.write("---")
@@ -127,6 +163,21 @@ else:
     **Interpretation:** At the stability limit the explicit scheme reproduces the Black-Scholes price with a
     maximum error of {err_e:.1e} in the central region. {'With the course interval the upper boundary sits at S ≈ ' + f'{K * np.exp(b):.0f}' + ', too close to the region of interest: the boundary approximation S − Ke^{−r(T−t)} ignores the remaining time value and the error is visible. Switch to the wide grid.' if not grid.startswith('Wide') else 'Push m beyond the stability limit to see the scheme explode, or switch to the naive boundary condition.'}
     """)
+with st.expander("🎓 Deep dive: von Neumann stability analysis of the explicit scheme"):
+    st.markdown(r"""
+    Insert a single Fourier mode $w_i^{(\nu)} = g^\nu e^{\mathrm{i}k i\Delta x}$ into the explicit scheme
+    $w_i^{(\nu+1)} = \lambda w_{i-1}^{(\nu)} + (1 - 2\lambda)w_i^{(\nu)} + \lambda w_{i+1}^{(\nu)}$. Dividing by $g^\nu e^{\mathrm{i}ki\Delta x}$,
+
+    $$g = 1 - 2\lambda + 2\lambda\cos(k\Delta x) = 1 - 4\lambda\sin^2(k\Delta x/2).$$
+
+    The mode is amplified if $|g| > 1$. The worst case is the sawtooth mode $\sin^2 = 1$, with $g = 1 - 4\lambda$, so stability
+    needs $1 - 4\lambda \ge -1$, i.e. $\lambda \le 1/2$. This is exactly the zig-zag pattern you see when the scheme
+    explodes. For the implicit scheme $g = 1/(1 + 4\lambda\sin^2)$, always below 1 in absolute value — unconditionally stable.
+
+    Interpretation: in the explicit scheme information travels only one grid cell per time step, while the heat equation
+    spreads information infinitely fast; if the time step is too large relative to $\Delta x^2$, the scheme cannot keep up.
+    """)
+
 st.write("---")
 
 # ── 2. θ-schemes ─────────────────────────────────────────────────────
@@ -193,6 +244,15 @@ with st.expander("🧮 The tridiagonal (Thomas) algorithm"):
     A_t = np.diag(alpha_t) + np.diag(beta_t, 1) + np.diag(gamma_t, -1)
     st.write("Test: solving A x = A·(1, 2, 3) returns", thomas(alpha_t, beta_t, gamma_t, A_t @ np.array([1.0, 2.0, 3.0])))
     st.caption("The app itself uses scipy.linalg.solve_banded, which implements the same algorithm in compiled code.")
+with st.expander("📖 Intuition: Crank-Nicolson and non-smooth payoffs"):
+    st.markdown(r"""
+    Crank-Nicolson's amplification factor for the sawtooth mode tends to $-1$ for large $\lambda$: such modes are
+    **not damped**, they flip sign each step. The payoff kink at $K$ contains exactly such high-frequency components,
+    so with large time steps CN can show small oscillations near the strike — especially visible in gamma.
+    The standard remedy (**Rannacher smoothing**) is to take a few fully implicit steps at the start, which damp the
+    kink, and then continue with Crank-Nicolson.
+    """)
+
 st.write("---")
 
 # ── 3. American put ──────────────────────────────────────────────────
@@ -245,3 +305,52 @@ The free boundary rises towards $K$ as $t \\to T$. One FD run delivers this boun
 at once, while the binomial tree prices one $S(0)$ at a time — at $S = {S_test:.0f}$ both agree within
 {abs(fd_at - crr_ref):.3f}.
 """)
+
+with st.expander("🎓 Deep dive: American options as a linear complementarity problem"):
+    st.markdown(r"""
+    For an American put with obstacle $g$ (the payoff) the PDE becomes a set of inequalities: either the option is held
+    and the Black-Scholes PDE holds, or it is exercised and $v = g$. In transformed variables:
+
+    $$w_{\tilde t} - w_{xx} \ge 0, \qquad w - g \ge 0, \qquad (w_{\tilde t} - w_{xx})(w - g) = 0.$$
+
+    After discretisation each time step is a **linear complementarity problem** (LCP): find $w \ge g$ with $Aw \ge b$ and
+    $(Aw - b)^\top(w - g) = 0$. Methods:
+
+    - **Projection** (used here): solve the linear system, then set $w \leftarrow \max(w, g)$. Simple and, for puts in the
+      Black-Scholes model, close to exact (Brennan-Schwartz).
+    - **PSOR** (projected successive over-relaxation): Gauss-Seidel iterations with the projection applied after every
+      component update — solves the LCP exactly.
+    - **Penalty methods**: add a large penalty term for $w < g$ and solve a non-linear system with Newton's method.
+
+    The **free boundary** $S^*(t)$ is not computed explicitly; it appears automatically where the solution touches the obstacle.
+    """)
+
+with st.expander("📖 Outlook: finite differences for the Heston model"):
+    st.markdown(r"""
+    For Heston the price depends on $(t, S, \gamma)$, so the PDE (Section 5.5) lives on a **two-dimensional** space grid
+    and contains a mixed derivative $\partial_{S\gamma}$ from the correlation. A grid with $m$ points per axis has $m^2$
+    unknowns per time step, and the implicit system is no longer tridiagonal. **ADI schemes**
+    (alternating direction implicit, e.g. Douglas or Craig-Sneyd) split each step into one-dimensional implicit sweeps that
+    are again tridiagonal. Beyond three or four dimensions the curse of dimensionality makes grids impractical —
+    Monte Carlo takes over.
+    """)
+
+takeaways([
+    "Log-price, reversed time and an exponential factor turn the Black-Scholes PDE into the heat equation.",
+    "Explicit: simple but stable only for $\\lambda = \\Delta\\tilde t/\\Delta x^2 \\le 1/2$; implicit and Crank-Nicolson are unconditionally stable.",
+    "Crank-Nicolson is second order in time and space; boundary conditions and a wide enough grid matter as much as the scheme.",
+    "American options lead to a linear complementarity problem; projection, PSOR or penalty methods solve it, and the free boundary comes for free.",
+])
+
+test_yourself("fd", [
+    (r"Derive the stability condition of the explicit scheme for $w_{\tilde t} = w_{xx}$.",
+     r"Von Neumann: the amplification factor is $g = 1 - 4\lambda\sin^2(k\Delta x/2)$; $|g| \le 1$ for all $k$ requires $\lambda = \Delta\tilde t/\Delta x^2 \le 1/2$."),
+    (r"Why is Crank-Nicolson second order in time while the implicit scheme is only first order?",
+     r"CN evaluates the space derivative as the average of the old and the new time level, i.e. it is centred at $\tilde t + \Delta\tilde t/2$, so the first-order term of the Taylor expansion in time cancels (trapezoidal rule)."),
+    (r"Which boundary conditions do you need for a European call on $[a, b]$ in log-price, and what goes wrong if you set $v = 0$ at $b$?",
+     r"$v \approx 0$ at $S = Ke^a$ and $v \approx S - Ke^{-r(T-t)}$ at $S = Ke^b$. Setting $v = 0$ at the top forces the computed call to drop to zero for large $S$, producing a non-monotone, wrong price surface."),
+    (r"What is the cost per time step of the implicit scheme, and why?",
+     r"$O(m)$: the system matrix is tridiagonal and the Thomas algorithm needs one forward elimination and one back substitution."),
+    (r"How does the American put enter the finite difference scheme?",
+     r"Each step must satisfy $w \ge g$ (value at least the payoff); the simplest method projects $w \leftarrow \max(w, g)$ after each linear solve, more exact ones solve the resulting LCP with PSOR or penalty methods."),
+])

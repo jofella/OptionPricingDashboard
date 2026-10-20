@@ -10,6 +10,7 @@ from scipy.stats import ncx2
 
 from util.monte_carlo import gbm_paths, coarsen
 from util.heston import simulate_variance_exact, simulate_variance_euler
+from util.ui import takeaways, test_yourself
 
 st.title("〽️ Simulating Stochastic Differential Equations")
 st.markdown(r"""
@@ -40,6 +41,22 @@ with st.expander("📖 Strong vs weak convergence"):
 
     For a plain European option the extra effort of Milstein therefore buys little; for path-dependent
     products and for multilevel methods its better strong order pays off.
+    """)
+
+with st.expander("🎓 Deep dive: where the Milstein correction comes from (Itô-Taylor expansion)"):
+    st.markdown(r"""
+    Over one step, $X(t + \Delta t) = X(t) + \int_t^{t+\Delta t}a(X_s)\,ds + \int_t^{t+\Delta t}b(X_s)\,dW_s$. Euler freezes
+    the integrands at time $t$. To do better, expand $b(X_s)$ itself with Itô's formula:
+    $b(X_s) \approx b(X_t) + b'(X_t)b(X_t)(W_s - W_t)$. Plugging this in,
+
+    $$\int_t^{t+\Delta t}b(X_s)\,dW_s \approx b(X_t)\Delta W + b'(X_t)b(X_t)\int_t^{t+\Delta t}(W_s - W_t)\,dW_s.$$
+
+    The remaining stochastic integral can be computed with Itô's formula: $\int_t^{t+\Delta t}(W_s - W_t)\,dW_s = \tfrac12\big((\Delta W)^2 - \Delta t\big)$.
+    This term has standard deviation of order $\Delta t$ — the same order as the drift term, so Euler's neglect of it
+    limits Euler to strong order $1/2$. Including it gives Milstein with strong order 1.
+
+    **Trick for GBM:** simulating $\log S$ instead of $S$ makes the SDE have constant coefficients; the Euler scheme for
+    $\log S$ is then *exact*. Transforming to coordinates with additive noise is often the best "scheme".
     """)
 
 st.write("---")
@@ -77,6 +94,15 @@ is what *strong* convergence is about. The Euler error accumulates in a random-w
 the leading error term ({(S_mi[-1] - S_ex[-1]) / S_ex[-1]:+.3%}). Increase $\\sigma$ to make the
 difference more dramatic: the neglected term $\\frac12\\sigma^2 S((\\Delta W)^2 - \\Delta t)$ scales with $\\sigma^2$.
 """)
+with st.expander("📖 Intuition: why the errors are measured with the same Brownian motion"):
+    st.markdown(r"""
+    Strong convergence compares the **simulated path** with the **true path driven by the same noise**. To measure it
+    we need the true path and the scheme on a common Brownian motion: we simulate the Brownian increments on the
+    finest grid and sum them to get the increments of coarser grids. Using fresh random numbers on each grid would
+    compare two unrelated paths and the error would never go to zero — that would be a comparison of distributions
+    (weak convergence) instead.
+    """)
+
 st.write("---")
 
 # ── 2. Strong order ──────────────────────────────────────────────────
@@ -119,6 +145,22 @@ matching the theoretical strong orders 1/2 and 1. Halving $\\Delta t$ reduces th
 factor 2 but the Euler error only by $\\sqrt2 \\approx 1.41$. At the finest grid Milstein is
 {err_eu[-1] / err_mi[-1]:.0f}× more accurate for the same number of steps.
 """)
+with st.expander("🎓 Deep dive: why strong vs. weak order matters — multilevel Monte Carlo"):
+    st.markdown(r"""
+    For a European price the total error of an SDE-based Monte Carlo estimate has two parts:
+
+    $$\text{MSE} = \underbrace{\big(E[f(X_m)] - E[f(X_T)]\big)^2}_{\text{bias}^2 \;\sim\; \Delta t^{2\beta}} + \underbrace{\frac{\operatorname{Var}f(X_m)}{N}}_{\text{statistical error}}.$$
+
+    With weak order $\beta = 1$, an accuracy $\varepsilon$ needs $\Delta t \sim \varepsilon$ and $N \sim \varepsilon^{-2}$, i.e. a cost of
+    order $\varepsilon^{-3}$. **Multilevel Monte Carlo** (Giles, 2008) writes $E[f(X_{\text{fine}})]$ as a telescoping sum of
+    corrections between consecutive grids that share the same Brownian motion. The corrections have small variance
+    *because of strong convergence*, so most samples can be taken on cheap coarse grids. With Milstein (strong order 1)
+    the cost drops to $\varepsilon^{-2}$ — the same as if the exact solution were available.
+
+    The same "fine minus coarse on shared noise" idea also appears in Richardson extrapolation of the
+    discretisation bias, $2E[f(X_{\Delta t/2})] - E[f(X_{\Delta t})]$.
+    """)
+
 st.write("---")
 
 # ── 3. Heston variance ───────────────────────────────────────────────
@@ -190,3 +232,21 @@ does not prevent negative states — it only uses $\\gamma^+$ inside drift and d
 values stays similar while the scheme remains well defined; *reflection* removes them but adds a clear upward bias.
 {'The Feller condition is violated, so even the true process touches zero; Euler fixes then introduce visible bias.' if 2 * kappa < sig_t**2 else 'Lower κ or raise σ̃ to violate the Feller condition and see the Euler fixes become biased.'}
 """)
+
+takeaways([
+    "Euler freezes the coefficients over a step: strong order 1/2, weak order 1.",
+    "Milstein adds $\\frac12 bb'((\\Delta W)^2 - \\Delta t)$ from the Itô-Taylor expansion: strong order 1.",
+    "Strong convergence matters for path-dependent payoffs and multilevel Monte Carlo; weak convergence for European prices.",
+    "Square-root processes (Heston variance) break naive Euler; exact simulation via the non-central $\\chi^2$ law has no bias.",
+])
+
+test_yourself("sde", [
+    (r"Write down the Euler and the Milstein step for $dS = rS\,dt + \sigma S\,dW$.",
+     r"Euler: $S_{i+1} = S_i(1 + r\Delta t + \sigma\Delta W_i)$. Milstein adds $\frac12\sigma^2S_i((\Delta W_i)^2 - \Delta t)$, since $bb' = \sigma S\cdot\sigma$."),
+    (r"Define strong and weak order of convergence. What are they for Euler and Milstein?",
+     r"Strong: $E|X_m - X(T)| \le C\Delta t^\gamma$ (pathwise). Weak: $|E f(X_m) - E f(X(T))| \le C\Delta t^\beta$ (in distribution). Euler: $\gamma = 1/2$, $\beta = 1$; Milstein: $\gamma = 1$, $\beta = 1$."),
+    (r"Why can the plain Euler scheme for the Heston variance produce invalid values, and how does exact simulation avoid this?",
+     r"The Gaussian increment $\widetilde\sigma\sqrt{\gamma_i}\Delta W$ is unbounded, so $\gamma_{i+1}$ can be negative and $\sqrt{\gamma}$ undefined. Exact simulation draws from the true transition law (scaled non-central $\chi^2$), which is non-negative."),
+    (r"How can GBM be simulated without any discretisation error?",
+     r"Simulate $\log S$, which has constant coefficients: $\log S_{i+1} = \log S_i + (r - \sigma^2/2)\Delta t + \sigma\Delta W_i$ is exact."),
+])

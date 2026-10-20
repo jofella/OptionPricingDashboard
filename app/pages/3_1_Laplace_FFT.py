@@ -10,6 +10,7 @@ import streamlit as st
 
 from util.heston import heston_char, bs_char, f_tilde_call, laplace_price, laplace_delta, fft_call_prices
 from util.black_scholes import bs_price, bs_greeks
+from util.ui import takeaways, test_yourself
 
 st.title("〰️ Option Pricing with Integral Transforms")
 st.markdown(r"""
@@ -60,6 +61,39 @@ with st.expander("📖 The FFT trick (Section 3.2)"):
     which the FFT evaluates in $O(N\log N)$ — giving prices for **all $N$ log-strikes at once**.
     Prices at arbitrary strikes are then obtained by interpolation. Trade-off: $\delta$ small means a
     fine $u$-grid (accurate integral) but a coarse strike grid $2\pi/M$; large $M$ needs large $N$.
+    """)
+
+with st.expander("🎓 Deep dive: computing the transform of the call payoff"):
+    st.markdown(r"""
+    For $f(x) = (e^x - K)^+$ the payoff is non-zero only for $x > \log K$, so
+
+    $$\tilde f(z) = \int_{\log K}^\infty (e^x - K)e^{-zx}\,dx = \Big[\frac{e^{(1-z)x}}{1 - z} + \frac{Ke^{-zx}}{z}\Big]_{\log K}^{\infty}.$$
+
+    The upper limit vanishes only if $\operatorname{Re}(z) > 1$ (both exponentials must decay). Evaluating at
+    $x = \log K$ gives $-\frac{K^{1-z}}{1-z} - \frac{K^{1-z}}{z} = \frac{K^{1-z}}{z(z-1)}$. The pricing formula then
+    follows from the **inversion formula** of the bilateral Laplace transform,
+
+    $$f(x) = \frac{1}{2\pi i}\int_{R - i\infty}^{R + i\infty}\tilde f(z)e^{zx}\,dz,$$
+
+    by taking expectations inside the integral (Fubini): $E_Q[e^{zX(T)}] = \chi(-iz)$. Writing $z = R + iu$ and using
+    the symmetry of the integrand under $u \mapsto -u$ (complex conjugation) halves the integration range and
+    leaves only the real part.
+    """)
+
+with st.expander("📖 Intuition: what is a characteristic function, and why is it so convenient?"):
+    st.markdown(r"""
+    $\chi(u) = E[e^{iuX}]$ is the expectation of an oscillating, bounded function — it always exists and determines the
+    distribution uniquely. For the models used in finance it is often available in closed form even when the
+    density is not:
+
+    | Model | $\chi(u)$ of $\log S(T)$ | density |
+    |---|---|---|
+    | Black-Scholes | $\exp\big(iu m - \tfrac12\sigma^2Tu^2\big)$, $m = \log S(0) + (r - \sigma^2/2)T$ | normal — explicit |
+    | Heston | exponential-affine in $\log S(0), \gamma(0)$ | not explicit |
+    | Lévy models (NIG, Variance Gamma, …) | $\exp(T\,\psi(u))$ | often not explicit |
+
+    The trick of the chapter: **decompose the payoff into exponentials** (via the Laplace transform), price each
+    exponential with $\chi$, and add them up (the integral).
     """)
 
 st.write("---")
@@ -118,6 +152,19 @@ else:
     the poles $R = 0, 1$ make it decay slowly — both affect numerical accuracy, not the exact value.
     """)
 
+with st.expander("📖 Intuition: what changes with R in practice"):
+    st.markdown(r"""
+    Inside the valid strip the price does **not** depend on $R$ mathematically — but numerically it matters:
+
+    - $R$ close to 1: the factor $1/(z(z-1))$ is large near $u = 0$ (close to the pole), the integrand is peaked and
+      hard to integrate accurately.
+    - $R$ very large: $\chi(u - iR) = E[S(T)^R e^{iu\log S(T)}]$ involves high moments $E[S(T)^R]$, which may not exist
+      (fat-tailed models) or become numerically huge.
+
+    A value around $R = 1.5$ (tutorial choice) is a common compromise. For heavy-tailed models, $R$ must lie in the
+    range where the moment $E[S(T)^R]$ is finite.
+    """)
+
 st.write("---")
 
 # ── 2. FFT vs Laplace ────────────────────────────────────────────────
@@ -167,6 +214,21 @@ st.markdown(f"""
 accuracy trade-off: with too small $N$ the integration step $\\delta = M/N$ becomes coarse and the
 error grows; with too small $M$ the integral is truncated too early.
 """)
+with st.expander("🎓 Deep dive: why the FFT is fast, and how the grids are coupled"):
+    st.markdown(r"""
+    A discrete Fourier transform $\hat x_m = \sum_{n=1}^N x_n e^{-2\pi i(n-1)(m-1)/N}$ for all $m$ costs $N^2$ operations
+    if done naively. The **Fast Fourier Transform** (Cooley-Tukey) splits the sum into even and odd indices
+    recursively and needs only $O(N\log N)$ operations: for $N = 2^{15}$ that is about $5\cdot10^5$ instead of $10^9$.
+
+    To use it, the integration grid in $u$ and the log-strike grid must fit together:
+
+    $$u_n = (n - \tfrac12)\delta, \qquad \kappa_m = \kappa_1 + (m - 1)\Delta\kappa, \qquad \delta\cdot\Delta\kappa = \frac{2\pi}{N}.$$
+
+    With $\delta = M/N$ this is $\Delta\kappa = 2\pi/M$ — so the upper integration bound $M$ sets the **strike resolution**,
+    and $N$ sets the **integration accuracy** $\delta$. Fine integration *and* fine strike spacing require a large $N$.
+    Strikes between grid points are obtained by interpolation, which adds a small error.
+    """)
+
 st.write("---")
 
 # ── 3. Hedging ───────────────────────────────────────────────────────
@@ -204,3 +266,33 @@ st.markdown(f"""
 **Interpretation:** Deep in-the-money calls (small $K$) need one share per option, deep out-of-the-money
 calls almost none; in between the delta falls smoothly with the strike. {'In the Heston model the delta differs from the Black-Scholes delta with comparable average volatility, because the Heston distribution of S(T) is skewed and fat-tailed — the transform method captures this automatically at no extra cost.' if model == 'Heston' else 'In the Black-Scholes model the transform delta coincides with Φ(d₁), a useful check of the implementation.'}
 """)
+
+with st.expander("🎓 Deep dive: Greeks from transforms"):
+    st.markdown(r"""
+    Any parameter that enters only $\chi$ can be differentiated under the integral:
+
+    - **Delta:** $\partial_{S_0}\chi(u - iR) = \frac{R + iu}{S_0}\chi(u - iR)$, since $\chi$ depends on $S_0$ only through $S_0^{\,i(u - iR)}$.
+    - **Gamma:** differentiate again — the factor becomes $\frac{(R+iu)(R+iu-1)}{S_0^2}$, which conveniently cancels
+      the denominator of $\tilde f$.
+    - **Vega-type sensitivities** (e.g. with respect to $\gamma(0)$): $\partial_{\gamma_0}\chi = \psi_2\,\chi$ in the Heston model.
+
+    So hedging ratios cost one additional integral of the same type as the price — no simulation or finite differencing needed.
+    """)
+
+takeaways([
+    "Transform methods only need the characteristic function, which is known for many models without a closed-form density.",
+    "The Laplace transform of the call exists for $\\operatorname{Re}(z) > 1$; the damping constant $R$ must lie in that strip.",
+    "The FFT computes prices for thousands of log-strikes in one $O(N\\log N)$ step — ideal for calibration.",
+    "Greeks follow by differentiating the characteristic function under the integral.",
+])
+
+test_yourself("transforms", [
+    (r"Derive the Laplace transform of the call payoff $(e^x - K)^+$ and state where it exists.",
+     r"$\tilde f(z) = \int_{\log K}^\infty (e^x - K)e^{-zx}dx = \frac{K^{1-z}}{z(z-1)}$, valid for $\operatorname{Re}(z) > 1$."),
+    (r"Why does the pricing formula contain $\chi(u - iR)$ rather than $\chi(u)$?",
+     r"We need $E_Q[e^{zX(T)}]$ with $z = R + iu$; since $\chi(v) = E[e^{ivX}]$, this equals $\chi(-iz) = \chi(u - iR)$."),
+    (r"What do the parameters $N$ and $M$ (upper bound) control in the FFT method?",
+     r"$\delta = M/N$ is the integration step, $\Delta\kappa = 2\pi/M$ the log-strike spacing. $M$ trades integration range against strike resolution; $N$ (with fixed $M$) refines the integration."),
+    (r"Why is the FFT method so useful for calibration?",
+     r"Calibration evaluates the model at many parameter sets, each time for many strikes. The FFT prices all strikes of one maturity at once in $O(N\log N)$."),
+])

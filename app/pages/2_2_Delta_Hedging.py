@@ -8,6 +8,7 @@ import streamlit as st
 
 from util.black_scholes import bs_price, bs_greeks
 from util.data_utils import load_dax_sample, get_log_returns
+from util.ui import takeaways, test_yourself
 
 st.title("🛡️ Delta Hedging in Practice")
 st.markdown(r"""
@@ -37,6 +38,22 @@ with st.expander("📖 Why can't we hedge perfectly if the model says we can?"):
        hedger systematically gains or loses $\tfrac12\int_0^T \Gamma S^2(\sigma_{\text{real}}^2 - \sigma_{\text{hedge}}^2)\,dt$.
     3. **Model risk.** Real returns have jumps, fat tails and stochastic volatility — none of which the
        Black-Scholes delta accounts for. Transaction costs come on top.
+    """)
+
+with st.expander("📖 Intuition: what does 'self-financing' mean?"):
+    st.markdown(r"""
+    A strategy is **self-financing** if, after the initial investment, no money is added or withdrawn: every
+    purchase of shares is paid for by selling bonds (or borrowing), and every sale of shares goes into the bond
+    account. Formally, the value $V = \varphi_0B + \varphi_1S$ changes only because prices move,
+
+    $$dV(t) = \varphi_0(t)\,dB(t) + \varphi_1(t)\,dS(t),$$
+
+    not because of rebalancing. The bond update on this page,
+    $b(t_i) = b(t_{i-1})e^{r\Delta t} - (\varphi_1(t_i) - \varphi_1(t_{i-1}))S(t_i)$, is exactly this rule in discrete
+    time: the bond account earns interest and pays for the change in the share position.
+
+    Replication means: a self-financing strategy whose terminal value equals the payoff. Its initial cost **is**
+    the fair price — this is the economic content of the Black-Scholes formula.
     """)
 
 st.write("---")
@@ -106,6 +123,37 @@ The error is **not zero** although the Black-Scholes model claims perfect replic
 from the same year (in reality it would have to be forecast), and (iii) the DAX does not follow a
 geometric Brownian motion. Increase the rebalancing interval to see the error grow.
 """)
+with st.expander("🎓 Deep dive: where the hedging error comes from (the gamma P&L)"):
+    st.markdown(r"""
+    Between two rebalancing dates the hedger holds $\Delta$ shares while the option's value moves non-linearly.
+    A second-order Taylor expansion of the option value combined with the PDE shows that the discounted P&L
+    of the hedged position over one period of length $\delta t$ is approximately
+
+    $$\delta\text{P\&L} \approx \tfrac12\,\Gamma\,S^2\Big(\Big(\tfrac{\delta S}{S}\Big)^2 - \sigma_{\text{hedge}}^2\,\delta t\Big).$$
+
+    - If the realised squared return $(\delta S/S)^2$ equals its expectation $\sigma^2\delta t$, the errors average out.
+      With $n$ rebalancing dates the individual errors are roughly independent with variance of order $1/n^2$,
+      so their sum has standard deviation of order $1/\sqrt n$ — the slope in the right-hand plot.
+    - If the realised volatility differs from the hedging volatility, the bracket has a **non-zero mean**, and the
+      P&L accumulates to $\tfrac12\int_0^T \Gamma S^2(\sigma_{\text{real}}^2 - \sigma_{\text{hedge}}^2)\,dt$.
+      Its sign depends only on whether realised volatility was above or below the hedging volatility —
+      gamma is always positive for a long call or put.
+
+    Since gamma is largest near the strike and close to maturity, both effects are concentrated on paths that
+    hover around $K$ shortly before expiry.
+    """)
+
+with st.expander("📖 Intuition: what the DAX experiment does and does not show"):
+    st.markdown(r"""
+    The volatility used for the DAX hedge is estimated **from the same year** that is being hedged — in reality the
+    hedger would have to forecast it, typically by using the implied volatility at inception. The DAX experiment
+    therefore isolates mainly the discretisation effect and the non-normality of returns.
+
+    One path is one experiment: a single year of data cannot tell whether the hedging error was "typical". That
+    is why the second section repeats the experiment on thousands of simulated paths, where the distribution
+    of the hedging error becomes visible.
+    """)
+
 st.write("---")
 
 # ── 2. Simulated world ───────────────────────────────────────────────
@@ -184,3 +232,34 @@ more premium than the hedge consumes and earn a systematic profit — and lose i
 volatility. This is why option traders talk about "being long or short volatility" and why
 the volatility input, not the drift, is what matters for option pricing.
 """)
+
+with st.expander("🎓 Deep dive: transaction costs — why hedging continuously is impossible"):
+    st.markdown(r"""
+    The error shrinks like $1/\sqrt n$, so continuous rebalancing would remove it. But each rebalancing trade
+    costs money (bid-ask spread, fees). With proportional costs $k$ per unit traded, the total trading volume of a
+    delta hedge grows like $\sqrt n$, so total costs **grow** while the hedging error **shrinks**: there is an
+    optimal rebalancing frequency.
+
+    Leland (1985) showed that proportional costs can be approximately included by hedging with an enlarged
+    volatility $\sigma_L^2 = \sigma^2\big(1 + \sqrt{2/\pi}\,\frac{k}{\sigma\sqrt{\delta t}}\big)$. More general
+    frictions are the motivation for **deep hedging** (Chapter 6), where the cost term simply enters the loss
+    function that the neural network minimises.
+    """)
+
+takeaways([
+    "A self-financing replicating strategy costs exactly the option price; that is the meaning of the Black-Scholes price.",
+    "Discrete rebalancing leaves a random error of order $1/\\sqrt{n}$; hedging with the wrong volatility leaves a systematic one.",
+    "The hedging P&L is a gamma-weighted bet on realised vs. hedged volatility.",
+    "Transaction costs make continuous hedging impossible: there is a trade-off between hedging error and costs.",
+])
+
+test_yourself("hedging", [
+    (r"Write down the self-financing condition in discrete time for a portfolio of stock and bond.",
+     r"$\varphi_0(t_{i-1})B(t_{i-1}) + \varphi_1(t_{i-1})S(t_{i-1}) = \varphi_0(t_i)B(t_{i-1}) + \varphi_1(t_i)S(t_{i-1})$: the new position is bought at the old prices with the old wealth — rebalancing neither adds nor withdraws money."),
+    (r"How does the standard deviation of the hedging error scale with the number $n$ of rebalancing dates, and why?",
+     r"Like $1/\sqrt n$: each period contributes an error with variance $O(\delta t^2) = O(1/n^2)$, the $n$ errors are roughly independent, so the total variance is $O(1/n)$."),
+    (r"You sold a call at an implied volatility of 25%, the realised volatility turns out to be 18%, and you delta-hedge with 25%. Do you expect a profit or a loss?",
+     r"A profit: the hedging P&L of the seller is $\frac12\int\Gamma S^2(\sigma_{\text{hedge}}^2 - \sigma_{\text{real}}^2)dt > 0$ (sign reversed relative to the option holder). You charged for more volatility than was delivered."),
+    (r"Why is a short-dated at-the-money option the hardest to hedge?",
+     r"Its gamma is largest, so the delta changes rapidly with the stock price; between rebalancing dates the frozen hedge becomes inaccurate fastest."),
+])

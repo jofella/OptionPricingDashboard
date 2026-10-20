@@ -9,6 +9,7 @@ import streamlit as st
 from util.binomial import crr_price, crr_tree, crr_params, crr_bermudan, payoff_fn
 from util.black_scholes import bs_price
 from util.monte_carlo import gbm_paths, longstaff_schwartz_put, apply_exercise_policy
+from util.ui import takeaways, test_yourself
 
 st.title("⏱️ American Options by Regression: Longstaff-Schwartz")
 st.markdown(r"""
@@ -40,6 +41,18 @@ with st.expander("📖 Why regress only on in-the-money paths, and is the estima
     gives a low-biased estimate (a lower bound in expectation). Evaluating on the same paths that were
     used for the regression has a small high bias (the rule "peeks" at the future). The truth is
     typically bracketed by the two.
+    """)
+
+with st.expander("📖 Intuition: why American options are hard for Monte Carlo"):
+    st.markdown(r"""
+    Monte Carlo simulates **forward** in time, but the exercise decision needs information about the **future**:
+    exercising today is optimal only if it beats the expected value of waiting. On a tree every node has many
+    successors over which we can average; a simulated path has exactly **one** future. A naive "simulation within
+    the simulation" (new paths from every node) explodes in cost.
+
+    Longstaff and Schwartz's idea: although one path's future is very noisy, the paths that are at similar stock prices
+    today together reveal the *average* future — and averaging across neighbours is precisely what a **regression**
+    does.
     """)
 
 st.write("---")
@@ -122,6 +135,21 @@ future says little — but the regression across {len(x):,} paths recovers the *
 (blue). Where the red exercise value lies above the blue curve, exercising now beats waiting; the
 crossing point is the estimated **exercise boundary** at this date.
 """)
+with st.expander("🎓 Deep dive: regression = conditional expectation (L² projection)"):
+    st.markdown(r"""
+    The conditional expectation $C_i(S) = E[Y \mid S(t_i) = S]$ of the discounted future cash flow $Y$ is the function of
+    $S(t_i)$ that minimises the mean squared error $E\big[(Y - c(S(t_i)))^2\big]$ — it is the **orthogonal projection** of $Y$
+    onto the space $L^2$ of functions of $S(t_i)$. Restricting $c$ to the span of basis functions,
+    $c(S) = \sum_{k=0}^M a_k\ell_k(S)$, and replacing the expectation by the sample average gives ordinary least squares:
+
+    $$\hat a = \arg\min_a \sum_{n\in\text{ITM}}\Big(Y_n - \sum_k a_k\ell_k(S_{n,i})\Big)^2.$$
+
+    As the number of paths $N \to \infty$ the coefficients converge to the projection; as the number of basis
+    functions grows, the projection converges to the true conditional expectation (Clément, Lamberton & Protter, 2002).
+    Laguerre polynomials are the original choice of Longstaff and Schwartz, but simple polynomials $1, S, S^2, \dots$
+    work similarly — scaling $S$ (here by $K$) keeps the regression matrix well conditioned.
+    """)
+
 st.write("---")
 
 # ── Exercise boundary ────────────────────────────────────────────────
@@ -148,6 +176,14 @@ yet the resulting price is accurate: in-sample {V0:.4f}, out-of-sample {V_out:.4
 The pricing error is **second order** in the boundary error, because at the optimal boundary the
 value is flat with respect to small changes of the rule.
 """)
+with st.expander("📖 Intuition: why the price is accurate even though the boundary is noisy"):
+    st.markdown(r"""
+    At the optimal boundary, the holder is **indifferent** between exercising and continuing. Moving the boundary a little
+    therefore changes the value only to second order (an envelope-theorem argument). A boundary error of 1% causes a
+    price error far below 1% — which is why rough regressions still give good prices, but also why the *boundary*
+    itself is estimated much less precisely than the price.
+    """)
+
 st.write("---")
 
 # ── Sensitivity ──────────────────────────────────────────────────────
@@ -209,3 +245,33 @@ the individual LS estimates do not necessarily line up monotonically — to reso
 far more paths. Compared with the binomial tree, Longstaff-Schwartz is slower in one dimension but generalises
 to many underlyings and complex dynamics, where trees and PDE grids suffer from the curse of dimension.
 """)
+
+with st.expander("🎓 Deep dive: lower and upper bounds"):
+    st.markdown(r"""
+    - **Lower bound.** Any exercise rule $\tau$ gives $E_Q[e^{-r\tau}g(S_\tau)] \le V(0)$. Evaluating the fitted rule on
+      **independent** paths yields an unbiased estimate of this suboptimal value → low-biased price.
+    - **Upper bound (dual method).** Rogers (2002) and Haugh-Kogan showed
+      $V(0) = \inf_M E\big[\max_t (e^{-rt}g(S_t) - M_t)\big]$ over martingales $M$ with $M_0 = 0$. Any martingale gives an
+      upper bound; Andersen and Broadie (2004) build a good one from the regression's continuation values.
+
+    The gap between the two bounds is an honest error measure for the exercise rule — a standard way to report
+    American Monte Carlo prices in practice.
+    """)
+
+takeaways([
+    "American options need the continuation value, which a single simulated path cannot provide.",
+    "Longstaff-Schwartz estimates it by least-squares regression across in-the-money paths (an $L^2$ projection).",
+    "Cash flows use realised payoffs, not fitted values; the fitted rule only decides when to exercise.",
+    "Out-of-sample evaluation gives a lower bound; duality gives an upper bound; few exercise dates price a Bermudan option.",
+])
+
+test_yourself("lsm", [
+    (r"Describe the backward step of the Longstaff-Schwartz algorithm at date $t_i$.",
+     r"On in-the-money paths, regress the discounted realised future cash flows on basis functions of $S(t_i)$; where the immediate payoff is at least the fitted continuation value, set the exercise time to $t_i$ and the cash flow to $g(S(t_i))$."),
+    (r"Why are only in-the-money paths used in the regression?",
+     r"Exercise is only relevant where $g > 0$; fitting the continuation value on the relevant region gives a more accurate fit with the same number of basis functions."),
+    (r"Why does applying the estimated exercise rule to new paths give a low-biased estimate?",
+     r"The true price is the supremum over all stopping rules; any fixed (estimated) rule achieves at most this value, and on independent paths its value is estimated without bias."),
+    (r"How does the price change with the number $m$ of exercise dates, and why?",
+     r"It increases towards the American price: more dates means more exercise opportunities (a Bermudan option with $m$ dates is worth less than or equal to one with more dates)."),
+])

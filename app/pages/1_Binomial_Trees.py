@@ -8,6 +8,7 @@ import streamlit as st
 
 from util.binomial import crr_params, crr_tree, crr_price, crr_delta_tree, payoff_fn
 from util.black_scholes import bs_price, down_and_out_call
+from util.ui import takeaways, test_yourself
 
 st.title("🌳 Binomial Trees — The Cox-Ross-Rubinstein Model")
 st.markdown(r"""
@@ -54,6 +55,52 @@ with st.expander("📖 Why the grid is finer for small prices"):
     is large. This mirrors the log-normal Black-Scholes dynamics (percentage changes, not absolute
     changes, are i.i.d.). The downside: the resolution near a **fixed strike or barrier** depends on
     where the nodes happen to fall, which causes the saw-tooth convergence seen below.
+    """)
+
+with st.expander("🎓 Deep dive: one-period replication — why real-world probabilities do not matter"):
+    st.markdown(r"""
+    Take a single period: the stock moves from $S$ to $Su$ or $Sd$, and an option pays $V_u$ or $V_d$.
+    Build a portfolio of $\varphi_1$ shares and $\varphi_0$ bonds that pays **exactly** the same in both states:
+
+    $$\varphi_0 B e^{r\Delta t} + \varphi_1 S u = V_u, \qquad \varphi_0 B e^{r\Delta t} + \varphi_1 S d = V_d.$$
+
+    Two equations, two unknowns. Subtracting them gives the hedge ratio and then the bond position:
+
+    $$\varphi_1 = \frac{V_u - V_d}{S(u - d)}, \qquad \varphi_0 B = e^{-r\Delta t}\,\frac{u V_d - d V_u}{u - d}.$$
+
+    The portfolio costs $\varphi_0 B + \varphi_1 S$ today. If the option traded at any other price, buying the cheaper
+    of the two and selling the other would be a riskless profit (arbitrage). Rearranging the cost gives
+
+    $$V = e^{-r\Delta t}\big(q V_u + (1 - q) V_d\big), \qquad q = \frac{e^{r\Delta t} - d}{u - d}.$$
+
+    **Numerical example.** $S = 100$, $u = 1.1$, $d = 0.9$, $r = 0$, call with $K = 100$: $V_u = 10$, $V_d = 0$.
+    Then $\varphi_1 = 10/20 = 0.5$ shares and $\varphi_0 B = -45$ (borrow 45). Cost: $0.5 \cdot 100 - 45 = 5$.
+    With $q = (1 - 0.9)/0.2 = 0.5$ the formula gives $0.5 \cdot 10 = 5$ as well.
+
+    Nowhere did the real-world probability $p$ of an up-move enter. Whether the stock goes up with 90% or 10%
+    probability, the replicating portfolio costs the same — so the option price must be the same. The number $q$
+    is merely the weight that makes this pricing rule look like an expectation; it is the **martingale (risk-neutral)
+    probability**. The condition $d < e^{r\Delta t} < u$ guarantees $0 < q < 1$, i.e. absence of arbitrage.
+    """)
+
+with st.expander("🎓 Deep dive: why the CRR model converges to Black-Scholes"):
+    st.markdown(r"""
+    After $M$ steps, $\log S(T) = \log S(0) + \sum_{i=1}^M \xi_i$ with i.i.d. steps $\xi_i \in \{\log u, \log d\}$.
+    By construction (moment matching), each step has under $Q$ approximately
+
+    $$E_Q[\xi_i] \approx \big(r - \tfrac{\sigma^2}{2}\big)\Delta t, \qquad \operatorname{Var}_Q(\xi_i) \approx \sigma^2 \Delta t,$$
+
+    since $\log u = -\log d \approx \sigma\sqrt{\Delta t}$. Summing $M = T/\Delta t$ such steps gives mean
+    $(r - \sigma^2/2)T$ and variance $\sigma^2 T$, and by the **central limit theorem** the sum becomes normal:
+
+    $$\log S(T) \;\xrightarrow{M\to\infty}\; \mathcal N\Big(\log S(0) + \big(r - \tfrac{\sigma^2}{2}\big)T,\; \sigma^2 T\Big),$$
+
+    which is exactly the law of $\log S(T)$ under $Q$ in the Black-Scholes model. Since prices are expectations of
+    (continuous, not too fast growing) payoffs, tree prices converge to Black-Scholes prices. For calls and puts the
+    error is of order $1/M$, but the constant in front of $1/M$ oscillates — see Section 2.
+
+    This is why the lecture views the tree as a **numerical method** rather than as a model: the output is a
+    "correct answer in a slightly different market", which converges to the answer we want.
     """)
 
 st.write("---")
@@ -163,6 +210,20 @@ elif style == "American" and kind == "call":
     **No early exercise for calls:** For $r \\geq 0$ the continuation value of a call always exceeds
     its intrinsic value, so the American and European call prices coincide — no node is circled.
     """)
+with st.expander("🎓 Deep dive: the hedge ratio is a discrete delta"):
+    st.markdown(r"""
+    The hedge ratio $\varphi_1(t_i) = \dfrac{V(Su, t_i) - V(Sd, t_i)}{Su - Sd}$ is a **difference quotient** of the
+    option price with respect to the stock price. As $\Delta t \to 0$ the two nodes $Su$ and $Sd$ move together
+    ($Su - Sd \approx 2S\sigma\sqrt{\Delta t}$), and the quotient converges to the derivative
+    $\partial_x v(t, S)$ — the Black-Scholes **delta**. In the same way, the change of $\varphi_1$ between
+    neighbouring nodes approximates **gamma**.
+
+    The bond position $\varphi_0(t_i) = \big(V(S, t_{i-1}) - \varphi_1(t_i) S\big)/B(t_{i-1})$ finances the
+    shares. For a call it is negative (the hedger borrows money to buy shares); for a put the hedger is short
+    shares and holds a positive bond position. Hover over the nodes above: deep in the money the call hedge
+    holds almost one share, deep out of the money almost none.
+    """)
+
 st.write("---")
 
 # ── 2. Convergence ───────────────────────────────────────────────────
@@ -233,6 +294,24 @@ else:
     absolute error is {np.max(np.abs(crr_s - bs_s)):.4f} for CRR vs {np.max(np.abs(anch_s - bs_s)):.4f}
     for the anchored tree. The error is largest near the money, where the payoff kink matters most.
     """)
+with st.expander("🎓 Deep dive: where does the oscillating error come from?"):
+    st.markdown(r"""
+    The call payoff $(S - K)^+$ has a **kink** at $K$. The tree only "sees" the payoff at the terminal nodes,
+    which are spaced by a factor $u^2$. How well the kink is resolved depends on **where $K$ falls between two
+    neighbouring terminal nodes** — e.g. exactly on a node, or halfway between two. As $M$ changes, this relative
+    position jumps around, and so does the error. A careful expansion (Diener & Diener, 2004) shows
+
+    $$V_M - V_{BS} = \frac{c_1(\theta_M)}{M} + O\big(M^{-3/2}\big),$$
+
+    where $\theta_M \in [0, 1)$ is the relative position of $\log(K/S(0))$ on the grid of terminal log-prices. The
+    coefficient $c_1$ depends on $\theta_M$, which is why the error oscillates rather than decaying smoothly.
+
+    **The fix:** choose the tree so that $\theta_M$ is constant, e.g. a node exactly at $K$ (the anchored tree with
+    $ud = c$). The error is then a smooth $c/M$, and a smooth error is exactly what extrapolation methods need.
+    Leisen and Reimer (1996) go further and choose $u, d, q$ via a normal-binomial inversion formula, which
+    gives errors of order $1/M^2$ for odd $M$.
+    """)
+
 st.write("---")
 
 # ── 3. Bounds & parity ───────────────────────────────────────────────
@@ -276,6 +355,24 @@ every path ends near zero but a few explode). The put behaves the same way betwe
 $Ke^{{-rT}}$. The parity residual is at machine precision (max {np.max(np.abs(put_s - (call_s - S0 + K * np.exp(-r * T)))):.1e})
 for **every** $\\sigma$: parity is a model-free identity that the tree satisfies exactly.
 """)
+with st.expander("🎓 Deep dive: proving the bounds and the parity"):
+    st.markdown(r"""
+    All three statements follow from **static replication** — comparing portfolios at maturity — and therefore
+    hold in every arbitrage-free model, not only in the tree.
+
+    - **Parity.** Long call, short put: payoff $(S_T - K)^+ - (K - S_T)^+ = S_T - K$. The same payoff is produced by
+      one share and a short position in a zero-coupon bond with face value $K$. Equal payoffs ⇒ equal prices:
+      $V_{\text{call}} - V_{\text{put}} = S(0) - Ke^{-rT}$.
+    - **Upper bound for the call.** $(S_T - K)^+ \le S_T$, so the call is worth at most one share: $V_{\text{call}} \le S(0)$.
+    - **Lower bound for the call.** $(S_T - K)^+ \ge S_T - K$, so $V_{\text{call}} \ge S(0) - Ke^{-rT}$; together with
+      $V_{\text{call}} \ge 0$ this gives $V_{\text{call}} \ge (S(0) - Ke^{-rT})^+$. Equivalently, by Jensen's inequality,
+      $E_Q[e^{-rT}(S_T - K)^+] \ge (E_Q[e^{-rT}S_T] - Ke^{-rT})^+$.
+    - **Put bounds.** $0 \le (K - S_T)^+ \le K$ gives $0 \le V_{\text{put}} \le Ke^{-rT}$.
+
+    **Why does the price increase with $\sigma$?** The payoff is convex, so a more spread-out distribution of $S_T$
+    (with the same mean $S(0)e^{rT}$) increases its expectation — options are "long volatility".
+    """)
+
 st.write("---")
 
 # ── 4. Barrier options ───────────────────────────────────────────────
@@ -337,6 +434,24 @@ as $B$ or $M$ varies. Discrete monitoring also checks the barrier only at $t_i$,
 **above** the continuously monitored price ({closed:.4f}); at $M = {Ms_b[-1]}$ the gap is still
 {conv_b[-1] - closed:+.4f}. Letting $M \\to \\infty$ smooths the left curve into the closed form.
 """)
+with st.expander("📖 Intuition: why trade barrier options, and how to treat the barrier properly"):
+    st.markdown(r"""
+    A knock-out option is **cheaper** than the vanilla option because it is worthless in some scenarios.
+    Someone who believes the stock will never fall below $B$ gets the call payoff at a discount. Barrier options are
+    popular in structured products and FX markets for exactly that reason.
+
+    Numerically they are delicate: the payoff jumps from "full call" to zero when the barrier is touched, so small
+    changes in how the barrier is represented cause large price changes. Remedies:
+
+    - **Put the barrier on a node layer**: choose $M$ (or the anchoring constant $c$) so that $B = S(0)d^k$ for some $k$.
+    - **Continuity correction** (Broadie-Glasserman-Kou): a discretely monitored barrier $B$ behaves like a continuous
+      barrier shifted away from $S(0)$ by the factor $e^{0.5826\,\sigma\sqrt{\Delta t}}$.
+    - **Trinomial trees**, which have an extra degree of freedom to align nodes with the barrier.
+
+    Also distinguish the *contract*: a barrier monitored daily is a different product from one monitored
+    continuously, and the tree with $M$ steps prices a barrier monitored at the $M$ tree dates.
+    """)
+
 st.write("---")
 
 # ── 5. American options & Richardson ─────────────────────────────────
@@ -402,3 +517,62 @@ tree grows like $M^2$, extrapolation is almost free accuracy. The early exercise
 {ref - eu_put:.4f} is the value of the right to exercise before maturity; it is largest deep in the
 money where receiving $K$ early earns interest.
 """)
+
+with st.expander("🎓 Deep dive: American options as an optimal stopping problem"):
+    st.markdown(r"""
+    The holder of an American option chooses a **stopping time** $\tau$ (a decision rule that only uses
+    information available up to now) and receives $g(S(\tau))$. The fair price is
+
+    $$V(0) = \sup_{\tau} E_Q\big[e^{-r\tau} g(S(\tau))\big].$$
+
+    In discrete time this is solved backwards by **dynamic programming**: at each node compare the immediate
+    payoff with the discounted expected value of continuing,
+
+    $$V(S(t_{i-1}), t_{i-1}) = \max\Big\{g(S(t_{i-1})),\; e^{-r\Delta t}E_Q\big[V(S(t_i), t_i) \mid S(t_{i-1})\big]\Big\}.$$
+
+    The resulting process is the **Snell envelope** of the payoff: the smallest supermartingale (after discounting)
+    that dominates the payoff. Exercising at the first time $V = g$ is optimal.
+
+    **Why is early exercise of a call never optimal (no dividends, $r \ge 0$)?** At any $t < T$,
+
+    $$V_{\text{call}}(t) \ge S(t) - Ke^{-r(T-t)} \ge S(t) - K,$$
+
+    so the option alive is always worth at least as much as exercising it. Intuitively: exercising early means paying
+    $K$ earlier (losing interest) and giving up the insurance against the stock falling below $K$.
+    For the put, receiving $K$ early *earns* interest, so deep in the money exercise becomes optimal.
+    """)
+
+with st.expander("🎓 Deep dive: the algebra behind Richardson extrapolation"):
+    st.markdown(r"""
+    Suppose the error has the form $V_M = V + \frac{c}{M} + O(M^{-2})$ with an **unknown but fixed** constant $c$.
+    Then
+
+    $$2V_{2M} - V_M = 2V + \frac{2c}{2M} - V - \frac{c}{M} + O(M^{-2}) = V + O(M^{-2}),$$
+
+    so the leading error term cancels. The same idea underlies Romberg integration and is used with Monte Carlo
+    discretisation bias and finite differences (Section 5.4).
+
+    The catch: the assumption "fixed $c$" must hold. For the plain CRR tree $c$ oscillates with $M$ (see Section 2),
+    and the extrapolation can make things *worse*. The anchored tree makes the error regular; using the pair
+    $(2M, 4M)$ ensures both trees have the same parity, so they over- or undershoot in the same way.
+    """)
+
+takeaways([
+    "The binomial tree prices by **replication**: the price is the cost of the hedging portfolio, which gives the risk-neutral weights $q$.",
+    "With moment-matched $u, d, q$ the tree converges to Black-Scholes (central limit theorem), with an oscillating $O(1/M)$ error.",
+    "Barriers and American exercise fit naturally into backward induction; barriers converge slowly because of the grid.",
+    "Anchoring the tree at the strike makes the error smooth, and Richardson extrapolation then removes its leading term.",
+])
+
+test_yourself("binomial", [
+    (r"Why does the real-world probability $p$ of an up-move not appear in the option price?",
+     r"Because the option can be **replicated** by stock and bond in every one-period tree. The price must equal the cost of the replicating portfolio (otherwise arbitrage), and this cost does not depend on $p$. $q$ is just the weight that rewrites the cost as a discounted expectation."),
+    (r"Derive $q$ from the martingale condition $E_Q[S(t_i)/B(t_i) \mid \mathcal F_{t_{i-1}}] = S(t_{i-1})/B(t_{i-1})$.",
+     r"$q S u + (1-q) S d = S e^{r\Delta t}$, hence $q = \dfrac{e^{r\Delta t} - d}{u - d}$. It lies in $(0,1)$ iff $d < e^{r\Delta t} < u$ (no arbitrage)."),
+    (r"How many nodes does a recombining tree with $M$ steps have, and how many paths? Why does that matter for path-dependent options?",
+     r"$(M+1)(M+2)/2$ nodes but $2^M$ paths. Path-dependent payoffs generally need the whole path, so the cheap recombining structure is lost — barrier options are the lucky exception, because 'not yet knocked out' plus the current node is enough information."),
+    (r"Show that an American call on a non-dividend-paying stock is worth the same as the European call when $r \ge 0$.",
+     r"$V^{\text{Eur}}_{\text{call}}(t) \ge S(t) - Ke^{-r(T-t)} \ge S(t) - K$, so continuing is always worth at least the exercise value; the max in the American recursion always picks the continuation value."),
+    (r"What must be true about the error of a method for Richardson extrapolation $2V_{2M} - V_M$ to help?",
+     r"The error must have the regular form $c/M + O(M^{-2})$ with a constant $c$ independent of $M$. Oscillating errors (plain CRR near the strike) violate this."),
+])

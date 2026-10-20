@@ -10,6 +10,7 @@ from scipy.stats import norminvgauss
 
 from util.black_scholes import bs_price, down_and_out_call
 from util.monte_carlo import gbm_terminal, gbm_paths, mc_summary
+from util.ui import takeaways, test_yourself
 
 st.title("📉 Variance Reduction")
 st.markdown(r"""
@@ -23,6 +24,17 @@ Three classic techniques:
 | Control variates | subtract a correlated quantity with **known** mean | a similar, analytically priced product exists |
 | Importance sampling | sample from a shifted density and reweight | the payoff lives in a rare region |
 """)
+with st.expander("📖 Intuition: the cost of a Monte Carlo estimate"):
+    st.markdown(r"""
+    The work needed to reach an accuracy $\varepsilon$ is roughly
+
+    $$\text{work} \approx \text{cost per sample} \times \frac{1.96^2\,\sigma^2}{\varepsilon^2}.$$
+
+    A technique that halves $\sigma^2$ is as good as doubling the computer — as long as it does not double the cost per
+    sample. So variance reduction is always judged by **variance × cost**, e.g. antithetic pairs cost two payoff
+    evaluations and must be compared with $2N$ plain samples.
+    """)
+
 st.write("---")
 
 c = st.columns(5)
@@ -85,6 +97,20 @@ st.markdown(f"""
 **Interpretation:** For the {payoff_kind.lower()} the correlation between $h(X)$ and $h(-X)$ is
 {corr:+.3f}. {'Because the payoff is monotone in X, a high draw is paired with a low one and their errors largely cancel — at equal computational cost the confidence interval shrinks by a factor ' + f'{eps_p / eps_a:.2f}.' if corr < 0 else 'The straddle is **not monotone**: both very high and very low draws pay a lot, so h(X) and h(−X) are positively correlated and antithetic sampling is *worse* than plain Monte Carlo at equal cost. Antithetic variables are no free lunch.'}
 """)
+with st.expander("🎓 Deep dive: the variance of the antithetic estimator"):
+    st.markdown(r"""
+    For one pair, $\operatorname{Var}\Big(\frac{h(X) + h(-X)}{2}\Big) = \frac{1}{2}\big(\operatorname{Var}h(X) + \operatorname{Cov}(h(X), h(-X))\big)$.
+    Compared with two independent samples (variance $\frac12\operatorname{Var}h(X)$) the antithetic pair is better
+    exactly when the covariance is negative.
+
+    **When is it negative?** If $h$ is monotone, $h(X)$ and $h(-X)$ move in opposite directions (Chebyshev's
+    association inequality). Call and put payoffs are monotone in $X$ → it works. A straddle $|S_T - K|$ is
+    V-shaped: very high and very low $X$ both pay → positive covariance → it backfires.
+
+    A second benefit: the antithetic sample mean of $X$ is exactly 0 and the sample is symmetric, so all odd moments
+    of the input are matched — a simple form of "moment matching".
+    """)
+
 st.write("---")
 
 # ── 2. Control variates ──────────────────────────────────────────────
@@ -175,6 +201,25 @@ Broadie-Glasserman-Kou correction, i.e. the closed form evaluated at $Be^{{-0.58
 (Using the sample mean of $Y$ instead of $E[Y]$ would cancel the correction term completely.)
 The vanilla call has an exact mean but is less correlated when $B$ is close to $S(0)$ — try moving the barrier.
 """)
+with st.expander("🎓 Deep dive: the optimal coefficient β and the variance reduction"):
+    st.markdown(r"""
+    For any $\beta$, $h(X) - \beta(Y - E[Y])$ has the same mean as $h(X)$ and variance
+
+    $$\operatorname{Var}(h(X)) - 2\beta\operatorname{Cov}(h(X), Y) + \beta^2\operatorname{Var}(Y).$$
+
+    This quadratic in $\beta$ is minimal at $\beta^* = \operatorname{Cov}(h(X), Y)/\operatorname{Var}(Y)$ — the slope of a linear
+    regression of $h(X)$ on $Y$. The minimal variance is
+
+    $$\operatorname{Var}(h(X))\big(1 - \rho_{h(X), Y}^2\big),$$
+
+    so correlation 0.9 removes 81% of the variance, correlation 0.99 removes 98%. Estimating $\beta^*$ from the same
+    sample introduces a tiny bias of order $1/N$ — negligible in practice.
+
+    **Good controls:** the same product in a simpler model (geometric Asian for arithmetic Asian), a simpler product
+    in the same model (European for American, barrier for Parisian), or the underlying itself ($E[e^{-rT}S_T] = S_0$).
+    Several controls can be combined — $\beta$ then comes from a multiple regression.
+    """)
+
 st.write("---")
 
 # ── 3. Importance sampling ───────────────────────────────────────────
@@ -281,3 +326,41 @@ $\\theta^* \\approx {theta_opt:.3f}$. The effect grows for **out-of-the-money** 
 Monte Carlo wastes most draws on zero payoffs — raise the strike to see it. {'The shaded area marks tilts for which the variance is infinite; the estimated curve there is unreliable.' if finite_lo > th_lo else ''}
 {'**Warning:** with α ≤ 2 the plain estimator has infinite variance — compare the ± values with the reference price.' if alpha - beta_n <= 2 else ''}
 """)
+
+with st.expander("🎓 Deep dive: importance sampling, the zero-variance density, and exponential tilting"):
+    st.markdown(r"""
+    For any density $h$ that is positive where $f\cdot g$ is,
+
+    $$E_g[f(X)] = \int f(x)\frac{g(x)}{h(x)}h(x)\,dx = E_h\Big[f(Y)\frac{g(Y)}{h(Y)}\Big].$$
+
+    The second moment of the new estimator is $E_g\big[f(X)^2\,g(X)/h(X)\big]$. For $f \ge 0$ the choice
+    $h^* = fg/E_g[f]$ makes the weighted payoff **constant** — zero variance! It cannot be used (it requires the
+    unknown price $E_g[f]$), but it tells us what a good $h$ looks like: **proportional to payoff × density**, i.e.
+    concentrated where the payoff is large and likely.
+
+    **Exponential tilting** (the Esscher transform) $h_\theta(x) = g(x)e^{\theta x}/E[e^{\theta X}]$ is a convenient
+    one-parameter family: it stays in the NIG family (only $\beta$ changes), the weight $g/h_\theta = e^{-\theta x}E[e^{\theta X}]$
+    is explicit, and $\theta > 0$ shifts mass to the right where calls pay off. Choosing $\theta$ by minimising the
+    estimated second moment is what the tutorial does.
+
+    **Danger:** if $h$ has lighter tails than $f\cdot g$, the weights can be huge on rare samples, and the variance can
+    even become infinite — importance sampling done badly is worse than no importance sampling.
+    """)
+
+takeaways([
+    "Judge variance reduction by variance × cost per sample.",
+    "Antithetic variables help for monotone payoffs and can hurt for non-monotone ones.",
+    "Control variates reduce the variance by the factor $1 - \\rho^2$; the control's mean must be known exactly.",
+    "Importance sampling shifts samples to where payoff × density is large; exponential tilting is a convenient family, but heavy-tail conditions must be checked.",
+])
+
+test_yourself("vr", [
+    (r"Show that the antithetic estimator is better than plain Monte Carlo with the same number of payoff evaluations iff $\operatorname{Cov}(h(X), h(-X)) < 0$.",
+     r"Pair variance $\frac12(\operatorname{Var}h + \operatorname{Cov})$ versus $\frac12\operatorname{Var}h$ for two independent samples; the difference is $\frac12\operatorname{Cov}(h(X), h(-X))$."),
+    (r"Derive the optimal control variate coefficient $\beta^*$.",
+     r"Minimise $\operatorname{Var}h - 2\beta\operatorname{Cov}(h, Y) + \beta^2\operatorname{Var}Y$ in $\beta$: $\beta^* = \operatorname{Cov}(h, Y)/\operatorname{Var}Y$, giving variance $\operatorname{Var}h\,(1 - \rho^2)$."),
+    (r"Why does the control variate estimator need $E[Y]$ exactly, and what happens if you plug in the sample mean of $Y$?",
+     r"The correction term $\beta(Y - E[Y])$ must have mean zero; with the sample mean the correction averages to exactly zero and the estimator equals plain Monte Carlo — no variance reduction."),
+    (r"What is the zero-variance importance sampling density and why can it not be used directly?",
+     r"$h^* = fg/E_g[f]$ (for $f \ge 0$); it depends on the unknown quantity $E_g[f]$ that we want to compute."),
+])

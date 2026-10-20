@@ -10,6 +10,7 @@ from scipy.integrate import quad, solve_ivp
 
 from util.black_scholes import bs_price, bs_greeks, price_by_integration, perpetual_put
 from util.binomial import crr_price
+from util.ui import takeaways, test_yourself
 
 st.title("📐 The Black-Scholes Model")
 st.markdown(r"""
@@ -59,6 +60,47 @@ with st.expander("📖 The Greeks — sensitivities used for hedging"):
     earns $\Theta$ but pays for it through $\Gamma$ — the trade-off behind every hedging P&L.
     """)
 
+with st.expander("🎓 Deep dive: Brownian motion, Itô's formula and the solution of the GBM"):
+    st.markdown(r"""
+    **Brownian motion** $W$ has continuous paths, independent increments and $W(t) - W(s) \sim \mathcal N(0, t - s)$.
+    Its paths are so rough that $(dW)^2 = dt$ — the quadratic variation over $[0, t]$ equals $t$. This is why
+    ordinary calculus fails and **Itô's formula** has an extra second-order term: for $X$ with
+    $dX = \mu\,dt + \sigma\,dW$ and smooth $f$,
+
+    $$df(X) = f'(X)\,dX + \tfrac12 f''(X)\,\sigma^2\,dt.$$
+
+    Apply it to $f(S) = \log S$ for the stock $dS = rS\,dt + \sigma S\,dW^Q$ (with $f' = 1/S$, $f'' = -1/S^2$):
+
+    $$d\log S = \frac{dS}{S} - \frac{1}{2}\frac{\sigma^2 S^2}{S^2}dt = \big(r - \tfrac{\sigma^2}{2}\big)dt + \sigma\,dW^Q.$$
+
+    The right-hand side has constant coefficients, so it integrates directly:
+    $S(T) = S(0)\exp\big((r - \sigma^2/2)T + \sigma W^Q(T)\big)$. The famous $-\sigma^2/2$ is the **Itô correction**:
+    it makes $E_Q[S(T)] = S(0)e^{rT}$, because $E[e^{\sigma W(T)}] = e^{\sigma^2 T/2}$.
+
+    **Why $r$ and not $\mu$?** Under the real-world measure $P$ the drift is $\mu$. Girsanov's theorem allows changing
+    to an equivalent measure $Q$ under which the discounted stock is a martingale; this only changes the drift to $r$,
+    the volatility stays $\sigma$. Pricing happens under $Q$.
+    """)
+
+with st.expander("🎓 Deep dive: deriving the Black-Scholes PDE by hedging"):
+    st.markdown(r"""
+    Let $V(t) = v(t, S(t))$. By Itô's formula (now in two variables),
+
+    $$dV = \Big(\partial_t v + rS\,\partial_x v + \tfrac12\sigma^2 S^2\,\partial_{xx} v\Big)dt + \sigma S\,\partial_x v\,dW^Q.$$
+
+    Two equivalent arguments lead to the PDE:
+
+    1. **Martingale argument (lecture).** The discounted price $e^{-rt}V(t)$ must be a $Q$-martingale, so its
+       $dt$-term must vanish: $\partial_t v + rx\,\partial_x v + \tfrac12\sigma^2x^2\partial_{xx}v - rv = 0$.
+    2. **Hedging argument.** Hold the option and short $\Delta = \partial_x v$ shares. The $dW$-terms cancel, so the
+       portfolio is **riskless** over $dt$ and must earn the risk-free rate — which gives exactly the same equation.
+
+    Together with the terminal condition $v(T, x) = f(x)$ this is the **Black-Scholes PDE**. The
+    **Feynman-Kac formula** links both views: the solution of the PDE is
+    $v(t, x) = E_Q\big[e^{-r(T-t)}f(S(T)) \mid S(t) = x\big]$. Chapter 5 solves the PDE numerically; Chapters 1, 3 and 4
+    compute the expectation.
+    """)
+
 st.write("---")
 
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -105,6 +147,33 @@ function and gamma a spike at $K$: an at-the-money option close to expiry requir
 adjustments**, which is why hedging errors in practice are dominated by short-dated ATM options.
 Today the call delta is {gk['Delta']:.3f}, i.e. the hedge holds {gk['Delta']:.3f} shares per option.
 """)
+with st.expander("📖 Intuition: theta, gamma and the hedger's daily P&L"):
+    st.markdown(r"""
+    Plugging the Greeks into the PDE gives the identity
+
+    $$\Theta + rS\Delta + \tfrac12\sigma^2S^2\Gamma = rV.$$
+
+    For a delta-hedged position (long the option, short $\Delta$ shares, financed at rate $r$) this means: over a
+    short period $\delta t$ with stock move $\delta S$ the P&L is approximately
+
+    $$\tfrac12\Gamma\big((\delta S)^2 - \sigma^2S^2\delta t\big).$$
+
+    The option holder **gains when the stock moves more than** the implied volatility predicts and loses (through
+    time decay $\Theta$) when it moves less. Long options = long gamma = short theta. This trade-off is why a call
+    close to expiry and at the money (huge gamma) is both the most profitable and the most dangerous position to hedge.
+    """)
+
+with st.expander("📖 Intuition: how the Greeks behave"):
+    st.markdown(r"""
+    - **Delta** of a call rises from 0 (deep out of the money) to 1 (deep in the money); put delta = call delta − 1
+      (from parity).
+    - **Gamma** and **vega** are the same for calls and puts (parity: they differ by a linear position in $S$ and a bond).
+      Both peak near the money; gamma explodes near expiry, vega is largest for long maturities.
+    - **Theta** is usually negative for long options: with every day less time remains for the option to end up
+      in the money.
+    - **Rho** is positive for calls (higher $r$ lowers the present value of the strike you pay) and negative for puts.
+    """)
+
 st.write("---")
 
 # ── 2. Pricing by integration ────────────────────────────────────────
@@ -182,6 +251,25 @@ carries a discretisation error of {v_crr - v_int:+.1e}. The three approaches com
 | Binomial tree | any non-path-dependent (+ barriers) | **yes** | slow, $O(1/M)$ error |
 | Integration | any non-path-dependent | no | fast and accurate |
 """)
+with st.expander("🎓 Deep dive: where the integration formula comes from"):
+    st.markdown(r"""
+    Write $S(T) = S(t)\exp\big((r - \sigma^2/2)\tau + \sigma\sqrt\tau\,X\big)$ with $\tau = T - t$ and $X \sim \mathcal N(0,1)$
+    independent of the past. Then
+
+    $$V(t) = e^{-r\tau}E_Q[f(S(T))] = e^{-r\tau}\int_{-\infty}^\infty f\Big(S(t)e^{(r - \sigma^2/2)\tau + \sigma\sqrt\tau x}\Big)\frac{e^{-x^2/2}}{\sqrt{2\pi}}\,dx.$$
+
+    This is just the expectation written against the standard normal density. Plugging in $f(x) = (x - K)^+$ and
+    splitting the integral at the point where the payoff becomes positive reproduces the closed form with
+    $\Phi(d_1)$ and $\Phi(d_2)$ — a good exercise.
+
+    **Why it beats the tree:** the integrand is smooth except at one kink, and adaptive quadrature (Gauss-Kronrod in
+    `scipy.integrate.quad`) places its evaluation points where they are needed, reaching machine precision with a
+    few hundred function evaluations. A tree with $M$ steps needs $O(M^2)$ operations for an $O(1/M)$ error.
+
+    **Limitations:** the integral representation needs the density of $S(T)$ (available in Black-Scholes, not in
+    Heston — see Chapter 3) and handles neither path dependence nor early exercise.
+    """)
+
 st.write("---")
 
 # ── 3. Perpetual American put ────────────────────────────────────────
@@ -228,3 +316,41 @@ $S$ — it contains every finite-maturity American put as a special case. Note h
 $r = {r}$: with low interest rates, receiving $K$ early earns little, so early exercise only pays off
 deep in the money. Increase $r$ to watch the boundary move towards $K$.
 """)
+
+with st.expander("🎓 Deep dive: solving the perpetual put by hand"):
+    st.markdown(r"""
+    Without maturity, the value $v$ does not depend on $t$, so the PDE becomes the ODE
+    $\tfrac12\sigma^2x^2v'' + rxv' - rv = 0$. It is an **Euler equation**: try $v(x) = x^p$, which gives
+
+    $$\tfrac12\sigma^2p(p - 1) + rp - r = 0 \quad\Longleftrightarrow\quad (p - 1)\big(\tfrac12\sigma^2 p + r\big) = 0,$$
+
+    so $p = 1$ or $p = -2r/\sigma^2$. The solution $x^1$ grows without bound, which is impossible for a put
+    (bounded by $K$), so $v(x) = A\,x^{-2r/\sigma^2}$ in the continuation region $x > x^*$. Two conditions fix $A$ and $x^*$:
+
+    - **value matching** $v(x^*) = K - x^*$,
+    - **smooth pasting** $v'(x^*) = -1$ (the optimal boundary is where the value curve touches the payoff tangentially).
+
+    Solving gives $x^* = \dfrac{2Kr}{2r + \sigma^2}$ and $A = (K - x^*)(x^*)^{2r/\sigma^2}$, i.e. the closed form shown above.
+    Smooth pasting is not an extra assumption: any other boundary would give a lower value, so it is the optimality condition.
+    """)
+
+takeaways([
+    "Under $Q$ the stock is a geometric Brownian motion with drift $r$; the $-\\sigma^2/2$ in the exponent is the Itô correction.",
+    "The Black-Scholes PDE follows from the martingale property (or a riskless hedge); Feynman-Kac connects PDE and expectation.",
+    "Greeks are linked through $\\Theta + rS\\Delta + \\frac12\\sigma^2S^2\\Gamma = rV$ — the hedger's P&L is a gamma-vs-theta trade-off.",
+    "Pricing by integration handles any European payoff fast and accurately, but needs the density and cannot do early exercise.",
+    "Perpetual American put: an ODE with a free boundary, solved by value matching and smooth pasting.",
+])
+
+test_yourself("bs", [
+    (r"Use Itô's formula to show that $E_Q[S(T)] = S(0)e^{rT}$.",
+     r"$S(T) = S(0)e^{(r - \sigma^2/2)T + \sigma W(T)}$ and $E[e^{\sigma W(T)}] = e^{\sigma^2T/2}$ (moment generating function of $\mathcal N(0, T)$), so $E_Q[S(T)] = S(0)e^{rT}e^{-\sigma^2T/2}e^{\sigma^2T/2} = S(0)e^{rT}$."),
+    (r"Why does the real-world drift $\mu$ not appear in the Black-Scholes formula?",
+     r"The option can be replicated by a self-financing portfolio; its cost is determined by the dynamics under $Q$, where the drift is $r$. Changing $\mu$ changes $P$ but not $Q$ (Girsanov changes only the drift)."),
+    (r"Interpret $\Phi(d_1)$ and $Ke^{-rT}\Phi(d_2)$ in the call formula.",
+     r"$\Phi(d_1)$ is the delta (shares in the hedge); $\Phi(d_2) = Q(S(T) > K)$ is the risk-neutral exercise probability, so $Ke^{-rT}\Phi(d_2)$ is the present value of the expected strike payment."),
+    (r"Why are gamma and vega equal for a call and a put with the same strike and maturity?",
+     r"By put-call parity the difference call − put $= S - Ke^{-r(T-t)}$ is linear in $S$ and does not depend on $\sigma$, so its second $S$-derivative and its $\sigma$-derivative vanish."),
+    (r"What are the two conditions that determine the free boundary $x^*$ of the perpetual American put?",
+     r"Value matching $v(x^*) = K - x^*$ and smooth pasting $v'(x^*) = -1$."),
+])

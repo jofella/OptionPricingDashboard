@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 from scipy.stats import rayleigh, expon, norm
+from util.ui import takeaways, test_yourself
 
 
 st.title("🔢 Random Number Generation")
@@ -69,6 +70,15 @@ distinct values exist), but a much finer and more even one. Park-Miller's huge m
 at the plotted resolution, and modern generators such as PCG64 combine several mechanisms to get
 astronomically long periods.
 """)
+with st.expander("📖 Intuition: seeds and reproducibility"):
+    st.markdown(r"""
+    A pseudo-random generator is a deterministic sequence started from a **seed**. Fixing the seed (as the tutorials
+    do with `np.random.seed(20)`) reproduces exactly the same "random" numbers — essential for debugging, for
+    comparing methods on the **same** random input (common random numbers), and for reproducible results.
+    Modern NumPy code uses `rng = np.random.default_rng(seed)`, which creates an independent generator object
+    instead of changing a global state.
+    """)
+
 st.write("---")
 
 # ── 2. Inversion ─────────────────────────────────────────────────────
@@ -115,6 +125,21 @@ catch many $u$'s and therefore produce many samples. With only {n_grid} grid poi
 inverse replaces $F$ by a polygon, which turns the density into a **step function** — visible in the
 right histogram for coarse grids. With enough grid points both methods are indistinguishable.
 """)
+with st.expander("🎓 Deep dive: generalised inverse and the exponential example"):
+    st.markdown(r"""
+    The pseudo-inverse $F^{-1}(u) = \inf\{x : F(x) \ge u\}$ is needed when $F$ has flat pieces or jumps; it satisfies
+    $F^{-1}(u) \le x \iff u \le F(x)$, which is all the proof needs.
+
+    **Exponential distribution** (lecture example): $F(x) = 1 - e^{-\lambda x}$ gives $F^{-1}(u) = -\log(1 - u)/\lambda$.
+    Since $1 - U$ is again uniform, $X = -\log(U)/\lambda$ works too.
+
+    **Discrete distributions** are also covered: for $P(X = x_k) = p_k$ pick the smallest $k$ with
+    $p_1 + \dots + p_k \ge U$.
+
+    **When is inversion impractical?** When $F^{-1}$ has no closed form (normal distribution!) — then one uses
+    numerical approximations of $\Phi^{-1}$ (what `scipy.stats.norm.ppf` does), interpolation as above, or other methods.
+    """)
+
 st.write("---")
 
 # ── 3. Acceptance / rejection ────────────────────────────────────────
@@ -182,6 +207,23 @@ density lives, which forces a huge $C$. The optimal scale $s^* \\approx {s_opt:.
 roughly {C / C_grid.min():.0f}× fewer proposals than the current choice. The samples are exact either way —
 only efficiency changes.
 """)
+with st.expander("🎓 Deep dive: why acceptance/rejection is exact, and why the acceptance rate is 1/C"):
+    st.markdown(r"""
+    Accepted values have the distribution of $Y$ conditional on acceptance:
+
+    $$P\Big(Y \le t \,\Big|\, U \le \tfrac{f(Y)}{Cg(Y)}\Big) = \frac{\int_{-\infty}^t \frac{f(y)}{Cg(y)}g(y)\,dy}{\int_{-\infty}^\infty \frac{f(y)}{Cg(y)}g(y)\,dy} = \frac{\frac1C\int_{-\infty}^t f(y)\,dy}{\frac1C} = \int_{-\infty}^t f(y)\,dy.$$
+
+    The denominator is the acceptance probability: $P(\text{accept}) = 1/C$. The number of proposals per accepted
+    sample is geometric with mean $C$.
+
+    **Geometric picture:** draw points uniformly under the curve $Cg$ (first $Y$, then a height $U\cdot Cg(Y)$) and keep
+    those that fall under $f$. The accepted points are uniform under $f$, so their $x$-coordinates have density $f$.
+
+    **Lecture example — normal from exponential:** $f$ = density of $|X|$ (half-normal), $g(x) = e^{-x}$. The ratio
+    $f/g = \sqrt{2/\pi}\,e^{x - x^2/2}$ is maximal at $x = 1$, so $C = \sqrt{2e/\pi} \approx 1.32$: about 76% of proposals
+    are accepted. A random sign then turns $|X|$ into $X$.
+    """)
+
 st.write("---")
 
 # ── 4. Transformations ───────────────────────────────────────────────
@@ -233,3 +275,49 @@ factor keeps the first coordinate and mixes the second as $X_2 = \rho Z_1 + \sqr
 the round cloud into an ellipse with exactly the requested correlation. This is how correlated Brownian
 motions for baskets, or for the stock and variance in the Heston model, are generated.
 """)
+
+with st.expander("🎓 Deep dive: the Box-Muller transformation via the change-of-variables formula"):
+    st.markdown(r"""
+    Write the two independent normals in polar coordinates, $Z_1 = R\cos\Theta$, $Z_2 = R\sin\Theta$. Their joint density
+    $\frac{1}{2\pi}e^{-(z_1^2 + z_2^2)/2}$ becomes, with the Jacobian $r$ of polar coordinates,
+
+    $$\frac{1}{2\pi}\cdot r e^{-r^2/2}, \qquad r > 0,\; \theta \in [0, 2\pi).$$
+
+    So $\Theta$ is uniform on $[0, 2\pi)$ and **independent** of $R$, whose density $re^{-r^2/2}$ is Rayleigh(1) with
+    $F(r) = 1 - e^{-r^2/2}$. Inversion gives $R = \sqrt{-2\log(1 - U_1)}$, or equivalently $\sqrt{-2\log U_1}$; and
+    $\Theta = 2\pi U_2$. That is exactly the Box-Muller formula. The polar (Marsaglia) method avoids the trigonometric
+    functions by an acceptance/rejection step on the unit disc.
+    """)
+
+with st.expander("🎓 Deep dive: Cholesky decomposition"):
+    st.markdown(r"""
+    Every symmetric positive definite matrix can be written as $\Sigma = AA^\top$ with a lower triangular $A$
+    (Cholesky). For two dimensions,
+
+    $$\Sigma = \begin{pmatrix}1 & \rho\\ \rho & 1\end{pmatrix} = \begin{pmatrix}1 & 0\\ \rho & \sqrt{1-\rho^2}\end{pmatrix}\begin{pmatrix}1 & \rho\\ 0 & \sqrt{1-\rho^2}\end{pmatrix},$$
+
+    so $X_1 = Z_1$, $X_2 = \rho Z_1 + \sqrt{1-\rho^2}\,Z_2$. This is how the Heston model's correlated Brownian increments are
+    simulated on the SDE page. In higher dimensions $\Sigma$ must be positive definite — an estimated or hand-made
+    correlation matrix that is not (e.g. inconsistent pairwise correlations) has no Cholesky factor, and the
+    decomposition fails.
+    """)
+
+takeaways([
+    "Computers produce pseudo-random uniforms; good generators have long periods and no visible structure in several dimensions.",
+    "Inversion $X = F^{-1}(U)$ is exact whenever the (pseudo-)inverse cdf can be evaluated.",
+    "Acceptance/rejection is exact for any density bounded by $Cg$; efficiency is $1/C$, so the proposal should resemble the target.",
+    "Box-Muller turns two uniforms into two independent normals; Cholesky turns independent normals into correlated ones.",
+])
+
+test_yourself("rng", [
+    (r"Show that $X = F^{-1}(U)$ has cdf $F$.",
+     r"$P(X \le x) = P(F^{-1}(U) \le x) = P(U \le F(x)) = F(x)$, using $F^{-1}(u) \le x \iff u \le F(x)$."),
+    (r"Derive an inversion sampler for the Rayleigh($\sigma$) distribution.",
+     r"$F(x) = 1 - e^{-x^2/(2\sigma^2)}$; solving $u = F(x)$ gives $x = \sqrt{-2\sigma^2\log(1-u)}$."),
+    (r"What is the expected number of proposals per accepted sample in acceptance/rejection, and how should $g$ be chosen?",
+     r"$C = \sup_x f(x)/g(x)$. Choose $g$ close in shape to $f$ (and with tails at least as heavy as $f$) so that $C$ is close to 1."),
+    (r"Why must the proposal density $g$ have tails at least as heavy as the target $f$?",
+     r"Otherwise $f/g$ is unbounded in the tails and no finite constant $C$ with $f \le Cg$ exists."),
+    (r"How do you simulate two standard normals with correlation $\rho$ from two independent ones?",
+     r"$X_1 = Z_1$, $X_2 = \rho Z_1 + \sqrt{1-\rho^2}Z_2$ (Cholesky factor of the correlation matrix)."),
+])

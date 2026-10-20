@@ -13,6 +13,7 @@ from scipy.optimize import minimize
 from util.black_scholes import bs_price, implied_vol
 from util.heston import heston_fft_prices
 from util.data_utils import load_sp500_options
+from util.ui import takeaways, test_yourself
 
 st.title("🎯 Implied Volatility and Model Calibration")
 st.markdown(r"""
@@ -41,6 +42,34 @@ with st.expander("📖 Why calibrate to implied volatilities rather than prices?
     partly compensate each other (e.g. high $\widetilde\sigma$ with weak correlation vs low $\widetilde\sigma$
     with strong correlation), so different starting points can lead to different local minima —
     especially with a **single maturity**, which does not pin down the mean-reversion speed.
+    """)
+
+with st.expander("🎓 Deep dive: why the implied volatility exists and is unique"):
+    st.markdown(r"""
+    For fixed $S(0), K, T, r$ consider $\sigma \mapsto V_{BS}(\sigma)$:
+
+    - it is **strictly increasing**, because vega $= S(0)\varphi(d_1)\sqrt T > 0$;
+    - it is continuous, with $V_{BS}(\sigma) \to (S(0) - Ke^{-rT})^+$ for $\sigma \to 0$ and $V_{BS}(\sigma) \to S(0)$ for
+      $\sigma \to \infty$ (the no-arbitrage bounds).
+
+    Hence every price strictly between the bounds has exactly one implied volatility (intermediate value theorem).
+    Prices outside the bounds would be arbitrage opportunities — data errors or stale quotes.
+
+    **Computing it.** Newton's method $\sigma_{k+1} = \sigma_k - (V_{BS}(\sigma_k) - \pi)/\text{vega}(\sigma_k)$ converges very
+    fast but can fail far out of the money where vega is tiny. **Bracketing** methods (bisection, Brent, Chandrupatla as
+    in the tutorial) keep an interval $[\sigma_{lo}, \sigma_{hi}]$ that always contains the root and are guaranteed to
+    converge. This dashboard uses vectorised bisection: 100 halvings shrink the interval by $2^{-100}$.
+    """)
+
+with st.expander("📖 Intuition: what the volatility smile tells us"):
+    st.markdown(r"""
+    If returns were lognormal with constant volatility, all implied volatilities would coincide. The observed skew says
+    the market prices **fatter left tails** than the lognormal: crash protection (low-strike puts) is expensive.
+    Since the 1987 crash, equity index smiles have been downward sloping — a persistent "crash premium".
+
+    Implied volatility is therefore best read as a **quoting convention**: a model-dependent translation of a price into a
+    number that is comparable across strikes, maturities and underlyings — "the wrong number in the wrong formula to
+    get the right price".
     """)
 
 st.write("---")
@@ -106,6 +135,22 @@ a premium for downside protection (low-strike puts, and via put-call parity the 
 which Black-Scholes with a single $\\sigma$ cannot reproduce. A model with stochastic volatility and
 negative correlation (Heston) can.
 """)
+with st.expander("🎓 Deep dive: calibration is an inverse problem"):
+    st.markdown(r"""
+    Pricing goes **from parameters to prices**; calibration goes backwards. Such inverse problems are typically
+    **ill-posed**:
+
+    - **Non-uniqueness.** Different parameter sets produce almost identical smiles at one maturity (e.g. $\kappa$ and
+      $\lambda$ compensate each other as long as $\kappa/\lambda$ and the effective variance over $[0, T]$ stay the same).
+    - **Instability.** Small changes in quotes (bid-ask noise) can move the optimal parameters a lot.
+    - **Local minima.** The objective is non-convex; the result depends on the starting point.
+
+    Remedies used in practice: calibrate to **several maturities** at once (the term structure identifies mean reversion),
+    fix some parameters from historical data, add a **regularisation** penalty such as
+    $\beta\|\theta - \theta_{\text{prev}}\|^2$ (keeps yesterday's parameters unless the data demand change), use global
+    optimisers or multiple starting points.
+    """)
+
 st.write("---")
 
 
@@ -132,6 +177,17 @@ fig2.add_trace(go.Scatter(x=strikes, y=iv_man, name="Heston (your parameters)", 
 fig2.update_layout(xaxis_title="Strike", yaxis_title="Implied volatility", height=380)
 st.plotly_chart(fig2, use_container_width=True)
 st.metric("IV root-mean-squared error", f"{rmse_man * 100:.3f} vol points")
+with st.expander("📖 Intuition: how to fit the smile by hand"):
+    st.markdown(r"""
+    A good order for the sliders:
+
+    1. $\gamma(0)$ sets the overall **level** near the money (short-term ATM implied vol $\approx \sqrt{\gamma(0)}$ for short maturities).
+    2. $\rho$ sets the **slope**: more negative → steeper downward skew.
+    3. $\widetilde\sigma$ sets the **curvature**: more vol of vol → stronger smile, higher wings.
+    4. $\kappa$ and $\lambda$ control how fast the variance drifts from $\gamma(0)$ to $\kappa/\lambda$ over the option's life —
+       with one maturity their effect is mostly on the level.
+    """)
+
 st.write("---")
 
 # ── Automatic calibration ────────────────────────────────────────────
@@ -206,3 +262,37 @@ if "calib" in st.session_state and st.session_state["calib"]["source"] == source
     """)
 else:
     st.caption("Press the button to run the calibration (each evaluation prices all strikes with one FFT).")
+
+with st.expander("🎓 Deep dive: how Nelder-Mead works"):
+    st.markdown(r"""
+    Nelder-Mead is a **derivative-free** optimiser: it needs only function values, which is convenient because
+    gradients of the IV objective are not available in closed form. In $d$ dimensions it keeps a **simplex** of $d + 1$
+    points (here 6 points in the 5-dimensional parameter space) and repeatedly replaces the worst point by
+
+    - **reflecting** it through the centroid of the others,
+    - **expanding** further if that was very successful,
+    - **contracting** towards the centroid if it was not,
+    - or **shrinking** the whole simplex towards the best point.
+
+    It is robust and easy to use but converges slowly and can stop in local minima — the spikes in the convergence plot
+    are trial points that were rejected. Gradient-based alternatives (Levenberg-Marquardt for least squares) are faster
+    when gradients can be computed, e.g. by differentiating the characteristic function.
+    """)
+
+takeaways([
+    "Implied volatility exists and is unique for every arbitrage-free price because the BS price is strictly increasing in $\\sigma$.",
+    "The equity skew reveals fatter left tails than the lognormal model — Black-Scholes cannot fit all strikes with one $\\sigma$.",
+    "Calibration is an ill-posed inverse problem; implied-volatility errors weight all strikes fairly.",
+    "With a single maturity, Heston's $\\rho$ and $\\widetilde\\sigma$ are well identified, the mean-reversion parameters are not.",
+])
+
+test_yourself("calibration", [
+    (r"Why does every call price strictly between $(S(0) - Ke^{-rT})^+$ and $S(0)$ have exactly one implied volatility?",
+     r"$\sigma \mapsto V_{BS}(\sigma)$ is continuous and strictly increasing (positive vega) with limits equal to these bounds, so the intermediate value theorem gives existence and monotonicity gives uniqueness."),
+    (r"Why is calibrating to squared price errors problematic across a wide strike range?",
+     r"Price errors are dominated by expensive in-the-money options; cheap wing options barely contribute, although they carry the skew/tail information. IV errors are on a common scale."),
+    (r"Name three reasons why calibration results can be unstable, and one remedy for each.",
+     r"Non-uniqueness → more maturities / fix parameters; noise sensitivity → regularisation; local minima → multiple starting points or global optimisers."),
+    (r"Which Heston parameter would you change to make the skew steeper?",
+     r"Make $\rho$ more negative."),
+])

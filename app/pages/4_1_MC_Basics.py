@@ -8,6 +8,7 @@ import streamlit as st
 
 from util.black_scholes import bs_price, chooser_price
 from util.monte_carlo import gbm_terminal, mc_summary
+from util.ui import takeaways, test_yourself
 
 st.title("🎲 Monte Carlo Simulation — The Basics")
 st.markdown(r"""
@@ -35,6 +36,39 @@ with st.expander("📖 Why Monte Carlo when it converges so slowly?"):
 
     The other lever is the constant $\sigma^2$: **variance reduction** (next pages) lowers $\sigma^2$
     instead of increasing $N$.
+    """)
+
+with st.expander("🎓 Deep dive: Monte Carlo as numerical integration"):
+    st.markdown(r"""
+    Every expectation is an integral: $E[h(X)] = \int h(x)\,g(x)\,dx$ with the density $g$ of $X$. In the unit cube,
+    $\int_{[0,1]^d} h(u)\,du = E[h(U)]$ with $U$ uniform. Monte Carlo replaces the integral by the average over random
+    points; deterministic rules (trapezoid, Simpson, Gauss) use a fixed grid instead.
+
+    | Method | error with $N$ function evaluations in dimension $d$ |
+    |---|---|
+    | trapezoidal rule | $O(N^{-2/d})$ |
+    | Simpson's rule | $O(N^{-4/d})$ |
+    | Monte Carlo | $O(N^{-1/2})$ — **independent of $d$** |
+
+    For $d = 1$ Monte Carlo loses badly. But a path-dependent option monitored daily for a year is an integral over
+    $d = 252$ dimensions; a grid with only 2 points per axis would already need $2^{252}$ points. This is where
+    Monte Carlo becomes the method of choice. (Quasi-Monte Carlo with low-discrepancy sequences improves the
+    rate towards $N^{-1}(\log N)^d$ for smooth integrands.)
+    """)
+
+with st.expander("📖 Intuition: what a 95% confidence interval does and does not say"):
+    st.markdown(r"""
+    The interval $\widehat V_N \pm 1.96\,\widehat\sigma_N/\sqrt N$ is **random** — it changes with every run. The
+    statement is about the procedure: if you repeat the simulation many times, about 95% of the intervals will contain
+    the true price. It does *not* say "the true price lies in this particular interval with 95% probability"
+    (the true price is not random).
+
+    Practical consequences:
+
+    - to halve the interval width you need **four times** as many simulations;
+    - report Monte Carlo prices **always with their standard error** — a price without error bar is not a result;
+    - the interval relies on the CLT, so it needs $\operatorname{Var}(h(X)) < \infty$ (see the NIG example on the
+      variance reduction page for what happens otherwise).
     """)
 
 st.write("---")
@@ -104,6 +138,20 @@ fig2.add_trace(go.Scatter(x=n[idx], y=np.sqrt(var_true / n[idx]), name="σ/√n"
 fig2.update_layout(xaxis_type="log", yaxis_type="log", xaxis_title="n", yaxis_title="Error", height=330,
                    title="Error decays like n^(−1/2): slope −1/2 on log-log axes")
 st.plotly_chart(fig2, use_container_width=True)
+with st.expander("🎓 Deep dive: law of large numbers and central limit theorem in this context"):
+    st.markdown(r"""
+    Let $Y_n = e^{-rT}f(S_n(T))$ be i.i.d. with mean $V$ and variance $\sigma^2$.
+
+    - **Strong LLN:** $\widehat V_N = \frac1N\sum Y_n \to V$ almost surely — needs only $E|Y| < \infty$.
+    - **Unbiasedness:** $E[\widehat V_N] = V$ for every $N$, and $\operatorname{Var}(\widehat V_N) = \sigma^2/N$.
+    - **CLT:** $\sqrt N(\widehat V_N - V)/\sigma \Rightarrow \mathcal N(0, 1)$, and remains valid with the sample standard
+      deviation $\widehat\sigma_N$ in place of $\sigma$ (Slutsky). This gives the confidence interval.
+
+    The variance $\sigma^2$ of the discounted payoff is a property of the **problem**, not of the method — and it is
+    the quantity that variance reduction targets. For the call here it is about 1000: one simulation is very noisy,
+    the average of 10 000 has standard error $\sqrt{1000/10000} \approx 0.32$.
+    """)
+
 st.write("---")
 
 # ── 2. Chooser option ────────────────────────────────────────────────
@@ -153,3 +201,34 @@ The chooser is worth more than either the call ({bs_price(S0, K, T, r, sigma):.3
 holder must commit at $t^*$. The exact price {exact:.4f} lies {'inside' if abs(est_ch - exact) <= eps_ch else 'outside'}
 the 95% confidence interval.
 """)
+
+with st.expander("🎓 Deep dive: the chooser option and put-call parity"):
+    st.markdown(r"""
+    At $t^*$ the holder takes the more valuable of call and put: $\max(C(t^*), P(t^*))$. By parity
+    $P(t^*) = C(t^*) - S(t^*) + Ke^{-r(T - t^*)}$, hence
+
+    $$\max(C, P) = C + \big(Ke^{-r(T-t^*)} - S(t^*)\big)^+.$$
+
+    The first term is a call with maturity $T$; the second is the payoff of a put with strike $Ke^{-r(T-t^*)}$ and
+    maturity $t^*$. Therefore the chooser is worth a call plus a put — closed form in Black-Scholes, which makes it a
+    perfect test case for the Monte Carlo estimator. The Monte Carlo approach itself would work unchanged for
+    choosers whose underlying options have no closed form.
+    """)
+
+takeaways([
+    "Monte Carlo estimates expectations by averages; the error is $\\sigma/\\sqrt{N}$, independent of the dimension.",
+    "Always report a confidence interval: $\\widehat V_N \\pm 1.96\\,\\widehat\\sigma_N/\\sqrt{N}$.",
+    "Halving the error costs four times the simulations — reducing $\\sigma$ is often cheaper (variance reduction).",
+    "Path dependence and decisions at intermediate dates (chooser) are natural in Monte Carlo.",
+])
+
+test_yourself("mcbasics", [
+    (r"An estimate with $N = 10\,000$ has a 95% half-width of 0.6. How many simulations do you need for a half-width of 0.1?",
+     r"The width scales like $1/\sqrt N$: a factor 6 smaller width needs $36\times$ more simulations, i.e. $N = 360\,000$."),
+    (r"Why is Monte Carlo preferred over grid-based quadrature for path-dependent options?",
+     r"Its error rate $N^{-1/2}$ does not depend on the dimension, whereas grid methods deteriorate like $N^{-k/d}$; path-dependent payoffs depend on many time points, i.e. a high-dimensional integral."),
+    (r"Which condition is needed for the confidence interval to be valid?",
+     r"A finite variance of the discounted payoff (CLT), and enough simulations for the normal approximation to be accurate."),
+    (r"Show that the chooser option equals a call plus a put with a modified strike.",
+     r"$\max(C, P) = C + (P - C)^+ = C + (Ke^{-r(T-t^*)} - S(t^*))^+$ by parity: a $T$-call plus a $t^*$-put with strike $Ke^{-r(T-t^*)}$."),
+])

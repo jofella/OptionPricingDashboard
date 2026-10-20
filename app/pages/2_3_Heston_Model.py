@@ -9,6 +9,7 @@ from scipy.stats import norm
 
 from util.heston import (heston_char, gil_pelaez_density, price_from_density, heston_fft_prices,
                          heston_implied_vols, simulate_variance_exact, simulate_heston_paths)
+from util.ui import takeaways, test_yourself
 
 st.title("🌪️ The Heston Stochastic Volatility Model")
 st.markdown(r"""
@@ -47,6 +48,51 @@ with st.expander("📖 Intuition: how do the parameters change the return distri
     - **Mean reversion $\lambda$** controls how long a volatility shock persists; strong mean reversion
       makes the model behave like Black-Scholes with $\sigma^2 = \kappa/\lambda$ for long maturities.
     - The **Feller condition** $2\kappa \ge \widetilde\sigma^2$ guarantees that $\gamma$ never hits zero.
+    """)
+
+with st.expander("🎓 Deep dive: the variance process (a CIR / square-root process)"):
+    st.markdown(r"""
+    The variance $d\gamma = (\kappa - \lambda\gamma)\,dt + \widetilde\sigma\sqrt\gamma\,d\widetilde W$ is the
+    **Cox-Ingersoll-Ross** process, originally an interest-rate model. Its key properties:
+
+    - **Mean reversion.** Taking expectations kills the $dW$-term: $\frac{d}{dt}E[\gamma(t)] = \kappa - \lambda E[\gamma(t)]$, so
+
+    $$E[\gamma(t)] = \frac{\kappa}{\lambda} + \Big(\gamma(0) - \frac{\kappa}{\lambda}\Big)e^{-\lambda t}.$$
+
+      The variance is pulled towards $\kappa/\lambda$ at speed $\lambda$ (half-life $\log 2/\lambda$).
+    - **Positivity.** Near zero the diffusion $\widetilde\sigma\sqrt\gamma$ vanishes while the drift $\kappa > 0$ pushes up.
+      If $2\kappa \ge \widetilde\sigma^2$ (**Feller condition**) the push is strong enough that $0$ is never reached;
+      otherwise $\gamma$ can touch zero but is immediately reflected — it never becomes negative.
+    - **Exact transition law.** $\gamma(t)$ given $\gamma(s)$ is a scaled **non-central $\chi^2$** variable, which is
+      what the exact simulation below uses.
+
+    Note: many textbooks write the drift as $\kappa(\theta - v)$. The lecture's $\kappa - \lambda\gamma$ is the same
+    with $\kappa_{\text{book}} = \lambda$ and $\theta_{\text{book}} = \kappa/\lambda$ — watch out when comparing formulas.
+    """)
+
+with st.expander("🎓 Deep dive: why the characteristic function is known (affine models)"):
+    st.markdown(r"""
+    In Heston, the drift and the squared volatility of the state $(\log S, \gamma)$ are **affine (linear) functions**
+    of the state. For such models the conditional characteristic function has an exponential-affine form,
+
+    $$E_Q\big[e^{iu\log S(T)} \mid \mathcal F_t\big] = \exp\big(\psi_0(t) + \psi_1(t)\log S(t) + \psi_2(t)\gamma(t)\big),$$
+
+    and plugging this guess into the pricing PDE splits it into **ordinary** differential equations (Riccati equations)
+    for $\psi_0, \psi_1, \psi_2$ that can be solved in closed form. That is the $\psi_0, \psi_2$ in the code — the
+    'stable' form avoids jumps of the complex logarithm for long maturities (the "Heston trap").
+
+    This structure is what makes Heston so popular: no closed-form density, but a closed-form characteristic function,
+    which is all that the transform methods of Chapter 3 need.
+    """)
+
+with st.expander("📖 Intuition: why the Heston market is incomplete"):
+    st.markdown(r"""
+    There are **two** sources of risk ($W^Q$ and $\widetilde W$) but only **one** risky traded asset (the stock).
+    A portfolio of stock and bond can neutralise the stock-price risk, but not the risk of volatility changing
+    independently of the stock. Hence options cannot be replicated perfectly by trading the stock alone, and
+    there are many equivalent martingale measures. Modelling directly under $Q$ (as the lecture does) means the
+    market has already "chosen" one of them — in practice by **calibrating** to option prices (Chapter 3).
+    Adding one option as a second hedging instrument would make the market complete again.
     """)
 
 st.write("---")
@@ -113,6 +159,16 @@ with half-life {np.log(2) / lamb:.2f} years, and stay strictly positive{' (the F
 On the right, with $\\rho = {rho}$, falling stock prices (solid) tend to coincide with rising
 volatility (dotted) — the **leverage effect** that makes crashes more likely than rallies of the same size.
 """)
+with st.expander("📖 Intuition: reading the paths"):
+    st.markdown(r"""
+    - The variance paths fluctuate strongly but always return towards the long-run level — volatility **clusters**:
+      high-variance periods last a while (governed by $\lambda$) and then fade.
+    - In the stock paths, periods of high $\sqrt\gamma$ show up as larger price swings. With $\rho < 0$, strong declines
+      tend to happen together with rising volatility, the pattern observed in equity markets (e.g. 2008, 2020).
+    - Compare with the GARCH model from risk management: GARCH is the discrete-time, econometric cousin of
+      stochastic volatility; Heston is its continuous-time version built for option pricing.
+    """)
+
 st.write("---")
 
 # ── 2. Density ───────────────────────────────────────────────────────
@@ -168,6 +224,20 @@ integrating the payoff against the Gil-Pelaez density agrees with the FFT price 
 {abs(p_dens - p_fft):.1e}. The detour via the density costs one integral **per point $x$**,
 which is why Chapter 3 prices directly from the characteristic function.
 """)
+with st.expander("🎓 Deep dive: the Gil-Pelaez inversion formula"):
+    st.markdown(r"""
+    The characteristic function is the Fourier transform of the density: $\chi(u) = \int e^{iux}f(x)\,dx$.
+    Fourier inversion gives $f(x) = \frac{1}{2\pi}\int_{-\infty}^\infty e^{-iux}\chi(u)\,du$. Because $f$ is real,
+    $\chi(-u) = \overline{\chi(u)}$, so the integrand at $-u$ is the complex conjugate of the one at $u$, and
+    the two halves combine to
+
+    $$f(x) = \frac1\pi\int_0^\infty \operatorname{Re}\big(e^{-iux}\chi(u)\big)\,du.$$
+
+    Numerically the integral is truncated (here at $u = 60$): the characteristic function decays quickly because the
+    density is smooth. Pricing via the density costs one integral per grid point $x$ plus one more integral for the
+    price — the transform methods of Chapter 3 skip the density entirely.
+    """)
+
 st.write("---")
 
 # ── 3. Smile ─────────────────────────────────────────────────────────
@@ -211,3 +281,22 @@ some commodity markets. Increasing the vol of vol $\\widetilde\\sigma$ bends the
 everything, because volatility shocks die out before maturity. These are exactly the levers the
 calibration in Chapter 3 pulls to fit market data.
 """)
+
+takeaways([
+    "Heston makes the variance a mean-reverting square-root (CIR) process; $\\rho$ links variance shocks to price shocks.",
+    "The Feller condition $2\\kappa \\ge \\widetilde\\sigma^2$ keeps the variance strictly positive.",
+    "No closed-form density, but a closed-form characteristic function (affine structure) — the key to Chapter 3.",
+    "$\\rho < 0$ produces negative skew (a downward-sloping implied volatility curve); $\\widetilde\\sigma$ produces fat tails and a smile.",
+    "With two risk sources and one traded risky asset the market is incomplete.",
+])
+
+test_yourself("heston", [
+    (r"Compute $E[\gamma(t)]$ for the Heston variance process and interpret $\kappa/\lambda$ and $\lambda$.",
+     r"$E[\gamma(t)] = \kappa/\lambda + (\gamma(0) - \kappa/\lambda)e^{-\lambda t}$: $\kappa/\lambda$ is the long-run variance level, $\lambda$ the speed of mean reversion (half-life $\log 2/\lambda$)."),
+    (r"Which parameter mainly controls the skew of the implied volatility curve, and which one its curvature?",
+     r"The correlation $\rho$ controls the skew (slope); the vol of vol $\widetilde\sigma$ controls the curvature (smile)."),
+    (r"Why can one not simply integrate the payoff against the density of $S(T)$ in the Heston model, as in Black-Scholes?",
+     r"The density is not known in closed form. It can be recovered numerically from the characteristic function (Gil-Pelaez), but that costs one integral per density point — transform methods price directly from $\chi$."),
+    (r"Explain in one sentence why the Heston market is incomplete.",
+     r"Two independent sources of risk (stock and variance shocks) but only one risky traded asset, so the variance risk cannot be hedged with the stock."),
+])

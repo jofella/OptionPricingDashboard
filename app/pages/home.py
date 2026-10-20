@@ -22,7 +22,48 @@ different numerical tool:
 
 No single method wins everywhere: trees are simple, transforms are fast, Monte Carlo is flexible,
 PDE methods are accurate, and neural networks scale to settings where everything else breaks.
+
+### What makes a numerical method good?
+- **Accuracy** — how close is the answer, and how does the error $\varepsilon(N) \approx CN^{-p}$ shrink with the
+  computational effort $N$? A higher rate $p$ wins eventually, a smaller constant $C$ may win for practical $N$.
+- **Speed** — operations and memory needed for a given accuracy.
+- **Implementation effort** — a method needed once does not justify a month of optimisation.
+- **Generality** — does it extend to other models and payoffs (path dependence, early exercise, many assets)?
 """)
+
+with st.expander("🧭 How to use this dashboard"):
+    st.markdown(r"""
+    Every page follows the same pattern:
+
+    1. **Theory** at the top, in the notation of the lecture notes.
+    2. **📖 Intuition** boxes explain the idea in plain language, often with a small numerical example.
+    3. **🎓 Deep dive** boxes contain derivations and background for exam preparation.
+    4. **Interactive sections**: change parameters with the widgets — all charts and the
+       **Interpretation** texts below them are recomputed from the actual numbers.
+    5. **💡 Key takeaways** and **📝 Test yourself** at the end of each page: exam-style questions with answers that
+       can be revealed one by one.
+
+    Suggested route: start with the binomial tree (Ch. 1) and Black-Scholes (Ch. 2), then compare how the same European
+    call is priced by transforms (Ch. 3), Monte Carlo (Ch. 4) and finite differences (Ch. 5). American options appear in
+    Ch. 1, 4 and 5 — comparing the three approaches is a good exam exercise.
+    """)
+
+with st.expander("🔤 Notation used throughout"):
+    st.markdown(r"""
+    | Symbol | Meaning |
+    |---|---|
+    | $S(t)$, $B(t) = e^{rt}$ | stock price and bank account (bond) |
+    | $r$, $\sigma$ | risk-free interest rate, volatility |
+    | $T$, $K$ | maturity, strike |
+    | $Q$ | equivalent martingale (risk-neutral) measure |
+    | $f$, $g$ | payoff of a European / American option |
+    | $V(t) = v(t, S(t))$ | option price and pricing function |
+    | $\varphi = (\varphi_0, \varphi_1)$ | hedging strategy: bonds and shares |
+    | $\Phi$, $\varphi$ (density) | standard normal cdf and density |
+    | $\gamma(t)$, $\kappa$, $\lambda$, $\widetilde\sigma$, $\rho$ | Heston variance and its parameters (long-run level $\kappa/\lambda$) |
+    | $\chi(u) = E_Q[e^{iu\log S(T)}]$ | characteristic function of the log price |
+    | $M$, $N$, $m$ | number of tree steps / simulations / time steps (depending on the chapter) |
+    """)
 
 st.divider()
 st.subheader("📚 Curriculum Coverage")
