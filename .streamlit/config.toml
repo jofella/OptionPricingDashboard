@@ -1,0 +1,13 @@
+# Streamlit configuration file to customize app behavior and appearance
+
+[server]
+headless = true            # Run Streamlit in headless mode (for deployment)
+port = 8501                # Set the port for your app (default is 8501)
+maxUploadSize = 100        # Maximum file upload size in MB
+
+[theme]
+primaryColor = "#2E6FD8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#000000"
+font = "sans serif"
